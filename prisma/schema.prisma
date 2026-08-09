@@ -1,0 +1,623 @@
+// Radhakundah Platform — Prisma schema
+// Conventions:
+//   - All timestamps stored UTC. Clients format to local time.
+//   - Every publicly indexable entity carries inline SEO columns.
+//   - No passwords anywhere: authentication is Google OAuth only.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearchPostgres"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ═══════════════════════════════════════════════════════════════
+// USERS & AUTH  (Google OAuth only — no passwords, no invites)
+// ═══════════════════════════════════════════════════════════════
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  EDITOR
+  MEMBER
+}
+
+enum UserStatus {
+  WHITELISTED
+  ACTIVE
+  SUSPENDED
+}
+
+enum AuthProvider {
+  GOOGLE
+}
+
+/// Staff and members share this table. Role decides capability.
+/// Whitelisting flow: admin inserts a row with email + role + WHITELISTED.
+/// On first Google sign-in the email matches, providerId binds, status -> ACTIVE.
+/// An unmatched Google sign-in creates a MEMBER row automatically.
+model User {
+  id            String       @id @default(cuid())
+  email         String       @unique
+  name          String
+  avatarUrl     String?
+  role          Role         @default(MEMBER)
+  status        UserStatus   @default(ACTIVE)
+  /// Seeded super admin. Cannot be deleted, demoted, or suspended by anyone.
+  isProtected   Boolean      @default(false)
+  /// EDITOR scope only, e.g. ["posts","research","gallery","videos"]
+  editorModules String[]     @default([])
+  provider      AuthProvider?
+  providerId    String?
+  invitedById   String?
+  lastLoginAt   DateTime?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  invitedBy     User?          @relation("Invites", fields: [invitedById], references: [id], onDelete: SetNull)
+  invitedUsers  User[]         @relation("Invites")
+  sessions      Session[]
+  posts         Post[]
+  comments      Comment[]
+  likes         Like[]
+  auditLogs     AuditLog[]
+  mediaUploads  Media[]
+  researchViews ResearchView[]
+
+  @@unique([provider, providerId])
+  @@index([role, status])
+}
+
+/// Refresh-token store. Enables real revocation and the "Session Management"
+/// requirement. Token itself is never stored, only its SHA-256 hash.
+model Session {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  userAgent String?
+  ip        String?
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/// Short-lived token backing Next.js draft mode.
+model PreviewToken {
+  id          String   @id @default(cuid())
+  tokenHash   String   @unique
+  entityType  String
+  entityId    String
+  createdById String
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([expiresAt])
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TAXONOMY
+// ═══════════════════════════════════════════════════════════════
+
+enum CategoryScope {
+  ARTICLE
+  BLOG
+  RESEARCH
+}
+
+model Category {
+  id          String        @id @default(cuid())
+  scope       CategoryScope
+  name        String
+  slug        String
+  description String?
+  order       Int           @default(0)
+
+  metaTitle       String?
+  metaDescription String?
+  noIndex         Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  posts    PostCategory[]
+  research Research[]
+
+  @@unique([scope, slug])
+  @@index([scope, order])
+}
+
+/// Shared freely across posts and research.
+model Tag {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  slug      String   @unique
+  createdAt DateTime @default(now())
+
+  posts    PostTag[]
+  research ResearchTag[]
+}
+
+/// Independent taxonomy for the video section.
+model VideoCategory {
+  id          String  @id @default(cuid())
+  name        String
+  slug        String  @unique
+  description String?
+  order       Int     @default(0)
+
+  metaTitle       String?
+  metaDescription String?
+  noIndex         Boolean @default(false)
+
+  videos Video[]
+}
+
+// ═══════════════════════════════════════════════════════════════
+// POSTS  (articles + blogs share one model, split by `placement`)
+// ═══════════════════════════════════════════════════════════════
+
+enum Placement {
+  ARTICLE
+  BLOG
+  BOTH
+}
+
+enum ContentStatus {
+  DRAFT
+  PUBLISHED
+}
+
+model Post {
+  id              String        @id @default(cuid())
+  placement       Placement
+  status          ContentStatus @default(DRAFT)
+  title           String
+  /// Globally unique so each post has exactly one canonical URL.
+  /// ARTICLE|BOTH -> /articles/{slug} ; BLOG -> /blogs/{slug}
+  slug            String        @unique
+  excerpt         String?
+  content         String
+  coverImageId    String?
+  authorId        String
+  /// Future value = scheduled. Public queries filter publishedAt <= now().
+  publishedAt     DateTime?
+  isFeatured      Boolean       @default(false)
+  viewCount       Int           @default(0)
+  commentsEnabled Boolean       @default(true)
+
+  metaTitle       String?
+  metaDescription String?
+  metaKeywords    String?
+  ogImageId       String?
+  canonicalUrl    String?
+  noIndex         Boolean @default(false)
+
+  searchVector Unsupported("tsvector")?
+  createdAt    DateTime                 @default(now())
+  updatedAt    DateTime                 @updatedAt
+
+  author     User           @relation(fields: [authorId], references: [id])
+  coverImage Media?         @relation("PostCover", fields: [coverImageId], references: [id], onDelete: SetNull)
+  ogImage    Media?         @relation("PostOg", fields: [ogImageId], references: [id], onDelete: SetNull)
+  categories PostCategory[]
+  tags       PostTag[]
+  comments   Comment[]
+  likes      Like[]
+
+  @@index([status, publishedAt(sort: Desc)])
+  @@index([placement, status, publishedAt(sort: Desc)])
+  @@index([isFeatured, status, publishedAt(sort: Desc)])
+  @@index([authorId])
+}
+
+model PostCategory {
+  postId     String
+  categoryId String
+
+  post     Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([postId, categoryId])
+  @@index([categoryId])
+}
+
+model PostTag {
+  postId String
+  tagId  String
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  tag  Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([postId, tagId])
+  @@index([tagId])
+}
+
+// ═══════════════════════════════════════════════════════════════
+// RESEARCH & AUTHORS
+// ═══════════════════════════════════════════════════════════════
+
+/// Distinct from User: a paper author need not have an account.
+model Author {
+  id          String  @id @default(cuid())
+  name        String
+  slug        String  @unique
+  affiliation String?
+  bio         String?
+  photoId     String?
+  email       String?
+  orcid       String?
+
+  metaTitle       String?
+  metaDescription String?
+  noIndex         Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  photo    Media?           @relation("AuthorPhoto", fields: [photoId], references: [id], onDelete: SetNull)
+  research ResearchAuthor[]
+}
+
+model Research {
+  id          String        @id @default(cuid())
+  title       String
+  slug        String        @unique
+  /// Public. The PDF is the body and is access-gated.
+  abstract    String
+  categoryId  String?
+  status      ContentStatus @default(DRAFT)
+  publishedAt DateTime?
+  isFeatured  Boolean       @default(false)
+  viewCount   Int           @default(0)
+
+  // Optional academic metadata
+  doi             String?
+  journal         String?
+  volume          String?
+  issue           String?
+  pages           String?
+  publicationYear Int?
+  keywords        String[]
+
+  metaTitle       String?
+  metaDescription String?
+  ogImageId       String?
+  noIndex         Boolean @default(false)
+
+  /// Text pulled from the PDFs. Feeds search only, never returned to clients.
+  extractedText String?
+  searchVector  Unsupported("tsvector")?
+  createdAt     DateTime                 @default(now())
+  updatedAt     DateTime                 @updatedAt
+
+  category Category?        @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  ogImage  Media?           @relation("ResearchOg", fields: [ogImageId], references: [id], onDelete: SetNull)
+  authors  ResearchAuthor[]
+  files    ResearchFile[]
+  tags     ResearchTag[]
+  views    ResearchView[]
+
+  @@index([status, publishedAt(sort: Desc)])
+  @@index([categoryId])
+  @@index([publicationYear])
+}
+
+model ResearchAuthor {
+  researchId      String
+  authorId        String
+  order           Int     @default(0)
+  isCorresponding Boolean @default(false)
+
+  research Research @relation(fields: [researchId], references: [id], onDelete: Cascade)
+  author   Author   @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@id([researchId, authorId])
+  @@index([authorId])
+}
+
+model ResearchTag {
+  researchId String
+  tagId      String
+
+  research Research @relation(fields: [researchId], references: [id], onDelete: Cascade)
+  tag      Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([researchId, tagId])
+  @@index([tagId])
+}
+
+/// Lives in the PRIVATE S3 bucket. Never has a public URL.
+/// Access is via a 60s presigned URL issued only to signed-in users.
+model ResearchFile {
+  id         String @id @default(cuid())
+  researchId String
+  label      String
+  s3Key      String @unique
+  fileName   String
+  mimeType   String
+  sizeBytes  Int
+  pageCount  Int?
+  order      Int    @default(0)
+
+  createdAt DateTime @default(now())
+
+  research Research @relation(fields: [researchId], references: [id], onDelete: Cascade)
+
+  @@index([researchId, order])
+}
+
+/// Audit trail of who opened which paper — the gating requirement is
+/// only meaningful if access is recorded.
+model ResearchView {
+  id         String   @id @default(cuid())
+  researchId String
+  userId     String
+  fileId     String?
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  research Research @relation(fields: [researchId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([researchId, createdAt])
+  @@index([userId, createdAt])
+}
+
+// ═══════════════════════════════════════════════════════════════
+// GALLERY  (gallery -> segment -> images)
+// ═══════════════════════════════════════════════════════════════
+
+model GallerySegment {
+  id           String  @id @default(cuid())
+  name         String
+  slug         String  @unique
+  /// Short description shown on the segment card in the gallery index.
+  description  String?
+  /// Default image shown on the segment card.
+  coverImageId String?
+  order        Int     @default(0)
+  isPublished  Boolean @default(true)
+
+  metaTitle       String?
+  metaDescription String?
+  noIndex         Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  coverImage Media?         @relation("SegmentCover", fields: [coverImageId], references: [id], onDelete: SetNull)
+  images     GalleryImage[]
+
+  @@index([isPublished, order])
+}
+
+model GalleryImage {
+  id        String  @id @default(cuid())
+  segmentId String
+  mediaId   String
+  /// Required at upload — accessibility and image SEO.
+  alt       String
+  caption   String?
+  order     Int     @default(0)
+
+  createdAt DateTime @default(now())
+
+  segment GallerySegment @relation(fields: [segmentId], references: [id], onDelete: Cascade)
+  media   Media          @relation(fields: [mediaId], references: [id], onDelete: Restrict)
+
+  @@index([segmentId, order])
+}
+
+// ═══════════════════════════════════════════════════════════════
+// VIDEOS  (YouTube only)
+// ═══════════════════════════════════════════════════════════════
+
+model Video {
+  id           String        @id @default(cuid())
+  title        String
+  slug         String        @unique
+  description  String?
+  /// Parsed from any YouTube URL form (watch, youtu.be, shorts, embed).
+  youtubeId    String        @unique
+  /// Auto-fetched from YouTube at save time.
+  thumbnailUrl String
+  durationSec  Int?
+  categoryId   String?
+  status       ContentStatus @default(DRAFT)
+  publishedAt  DateTime?
+  isFeatured   Boolean       @default(false)
+  viewCount    Int           @default(0)
+
+  metaTitle       String?
+  metaDescription String?
+  noIndex         Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  category VideoCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  @@index([status, publishedAt(sort: Desc)])
+  @@index([categoryId])
+  @@index([isFeatured, status])
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ENGAGEMENT  (requires sign-in; browsing does not)
+// ═══════════════════════════════════════════════════════════════
+
+model Comment {
+  id        String   @id @default(cuid())
+  postId    String
+  userId    String
+  body      String
+  isHidden  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([postId, isHidden, createdAt])
+  @@index([userId])
+}
+
+model Like {
+  postId    String
+  userId    String
+  createdAt DateTime @default(now())
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([postId, userId])
+  @@index([userId])
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MEDIA LIBRARY  (public S3 bucket + CDN)
+// ═══════════════════════════════════════════════════════════════
+
+model Media {
+  id        String  @id @default(cuid())
+  s3Key     String  @unique
+  url       String
+  fileName  String
+  mimeType  String
+  sizeBytes Int
+  width     Int?
+  height    Int?
+  alt       String?
+  folder    String  @default("/")
+  /// { thumb, medium, large, og } x { webp, original } generated by sharp
+  variants  Json?
+
+  uploadedById String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  uploadedBy       User?            @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  postCovers       Post[]           @relation("PostCover")
+  postOgImages     Post[]           @relation("PostOg")
+  researchOgImages Research[]       @relation("ResearchOg")
+  authorPhotos     Author[]         @relation("AuthorPhoto")
+  segmentCovers    GallerySegment[] @relation("SegmentCover")
+  galleryImages    GalleryImage[]
+  heroSlides       HeroSlide[]
+
+  @@index([folder, createdAt])
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SITE CONTENT & CONFIG
+// ═══════════════════════════════════════════════════════════════
+
+/// About Us is the only page today; the model is reusable for future
+/// static pages without new tables.
+model Page {
+  id    String @id @default(cuid())
+  key   String @unique
+  title String
+  /// { about, mission, vision, objectives, team[], journey[], contact }
+  sections Json
+
+  metaTitle       String?
+  metaDescription String?
+  ogImageId       String?
+  noIndex         Boolean @default(false)
+
+  updatedAt DateTime @updatedAt
+}
+
+model HeroSlide {
+  id       String  @id @default(cuid())
+  title    String
+  subtitle String?
+  imageId  String
+  ctaLabel String?
+  ctaUrl   String?
+  order    Int     @default(0)
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+
+  image Media @relation(fields: [imageId], references: [id], onDelete: Restrict)
+
+  @@index([isActive, order])
+}
+
+/// One row per setting key: site.title, site.logo, seo.defaultOgImage,
+/// contact.email, contact.address, contact.mapEmbed, social.*, analytics.ga4
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+model ContactMessage {
+  id        String   @id @default(cuid())
+  name      String
+  email     String
+  phone     String?
+  subject   String?
+  message   String
+  ip        String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([isRead, createdAt(sort: Desc)])
+}
+
+model Subscriber {
+  id               String   @id @default(cuid())
+  email            String   @unique
+  unsubscribeToken String   @unique
+  isActive         Boolean  @default(true)
+  ip               String?
+  createdAt        DateTime @default(now())
+
+  @@index([isActive])
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SEO & OPERATIONS
+// ═══════════════════════════════════════════════════════════════
+
+/// Written automatically when a published item's slug changes, and used by
+/// Next.js middleware to 301 instead of 404. Also holds the permanent
+/// /blogs/{slug} -> /articles/{slug} rule for BOTH-placement posts.
+model UrlRedirect {
+  id         String   @id @default(cuid())
+  fromPath   String   @unique
+  toPath     String
+  statusCode Int      @default(301)
+  isAuto     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  @@index([toPath])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String
+  entityType String?
+  entityId   String?
+  ip         String?
+  meta       Json?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([entityType, entityId])
+}
