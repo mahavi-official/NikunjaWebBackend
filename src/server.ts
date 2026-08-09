@@ -1,4 +1,4 @@
-import Fastify, { FastifyZodInstance } from "fastify";
+import Fastify from "fastify";
 import { ZodTypeProvider } from "fastify-type-provider-zod";
 import cookie from "@fastify/cookie";
 import multipart from "@fastify/multipart";
@@ -70,7 +70,7 @@ export async function buildApp() {
     });
   });
 
-  return fastify as FastifyZodInstance;
+  return fastify;
 }
 
-export type FastifyZodInstance = FastifyZodInstance;
+export type FastifyZodInstance = Awaited<ReturnType<typeof buildApp>>;

@@ -1,4 +1,4 @@
-import jwt from "jsonwebtoken";
+import jwt, { SignOptions } from "jsonwebtoken";
 import { createHash } from "node:crypto";
 import { env } from "@/config/env";
 
@@ -17,7 +17,7 @@ export function generateAccessToken(userId: string, role: string, editorModules:
     },
     env.JWT_ACCESS_SECRET,
     {
-      expiresIn: env.JWT_ACCESS_TTL,
+      expiresIn: env.JWT_ACCESS_TTL as SignOptions["expiresIn"],
       issuer: "radhakundah",
       audience: "radhakundah-app",
     }

@@ -27,9 +27,7 @@ async function helmetPlugin(fastify: FastifyInstance) {
     xFrameOptions: {
       action: "deny",
     },
-    xXssProtection: {
-      mode: "block",
-    },
+    xXssProtection: true,
   });
 
   console.log("✓ Security headers configured");

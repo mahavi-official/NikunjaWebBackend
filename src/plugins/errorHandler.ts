@@ -1,7 +1,7 @@
-import { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { FastifyInstance } from "fastify";
 import fp from "fastify-plugin";
 import { ZodError } from "zod";
-import { handleError, AppError, FieldError } from "@/lib/errors";
+import { handleError, FieldError } from "@/lib/errors";
 import { HTTP_STATUS } from "@/config/constants";
 
 async function errorHandlerPlugin(fastify: FastifyInstance) {
