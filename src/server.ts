@@ -10,6 +10,29 @@ import rateLimitPlugin from "@/plugins/rateLimit";
 import errorHandlerPlugin from "@/plugins/errorHandler";
 import prismaPlugin from "@/plugins/prisma";
 import loggerPlugin, { createLogger } from "@/plugins/logger";
+import authPlugin from "@/plugins/auth";
+import rbacPlugin from "@/plugins/rbac";
+import { registerAuthRoutes } from "@/modules/auth/auth.routes";
+import { registerUsersRoutes } from "@/modules/users/users.routes";
+import { registerMediaRoutes } from "@/modules/media/media.routes";
+import { registerCategoriesRoutes } from "@/modules/categories/categories.routes";
+import { registerTagsRoutes } from "@/modules/tags/tags.routes";
+import { registerPostsRoutes } from "@/modules/posts/posts.routes";
+import { registerAuthorsRoutes } from "@/modules/authors/authors.routes";
+import { registerResearchRoutes } from "@/modules/research/research.routes";
+import { registerGalleryRoutes } from "@/modules/gallery/gallery.routes";
+import { registerVideosRoutes } from "@/modules/videos/videos.routes";
+import { registerEngagementRoutes } from "@/modules/engagement/engagement.routes";
+import { registerPagesRoutes } from "@/modules/pages/pages.routes";
+import { registerHeroRoutes } from "@/modules/hero/hero.routes";
+import { registerSettingsRoutes } from "@/modules/settings/settings.routes";
+import { registerContactRoutes } from "@/modules/contact/contact.routes";
+import { registerNewsletterRoutes } from "@/modules/newsletter/newsletter.routes";
+import { registerSearchRoutes } from "@/modules/search/search.routes";
+import { registerSeoRoutes, registerSitemapRoutes } from "@/modules/seo/seo.routes";
+import { registerDashboardRoutes } from "@/modules/dashboard/dashboard.routes";
+import { registerHomeRoutes } from "@/modules/home/home.routes";
+import { registerMeRoutes } from "@/modules/users/me.routes";
 import { env } from "@/config/env";
 import { API_PREFIX } from "@/config/constants";
 
@@ -29,6 +52,8 @@ export async function buildApp() {
   await fastify.register(prismaPlugin);
   await fastify.register(cookie);
   await fastify.register(multipart);
+  await fastify.register(authPlugin);
+  await fastify.register(rbacPlugin);
   await fastify.register(swagger, {
     swagger: {
       info: {
@@ -69,6 +94,33 @@ export async function buildApp() {
       },
     });
   });
+
+  // Register module routes
+  await fastify.register(async (fastify) => {
+    await registerAuthRoutes(fastify);
+    await registerUsersRoutes(fastify);
+    await registerMediaRoutes(fastify);
+    await registerCategoriesRoutes(fastify);
+    await registerTagsRoutes(fastify);
+    await registerPostsRoutes(fastify);
+    await registerAuthorsRoutes(fastify);
+    await registerResearchRoutes(fastify);
+    await registerGalleryRoutes(fastify);
+    await registerVideosRoutes(fastify);
+    await registerEngagementRoutes(fastify);
+    await registerPagesRoutes(fastify);
+    await registerHeroRoutes(fastify);
+    await registerSettingsRoutes(fastify);
+    await registerContactRoutes(fastify);
+    await registerNewsletterRoutes(fastify);
+    await registerSearchRoutes(fastify);
+    await registerSeoRoutes(fastify);
+    await registerDashboardRoutes(fastify);
+    await registerHomeRoutes(fastify);
+    await registerMeRoutes(fastify);
+  }, { prefix: API_PREFIX });
+
+  await fastify.register(registerSitemapRoutes);
 
   return fastify;
 }

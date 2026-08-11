@@ -1,11 +1,16 @@
 import { buildApp } from "@/server";
 import { env } from "@/config/env";
+import { scheduleBackup } from "@/jobs/backup";
+import { schedulePruning } from "@/jobs/pruneAuditLogs";
 
 async function start() {
   const fastify = await buildApp();
 
   try {
     await fastify.listen({ port: env.PORT, host: "0.0.0.0" });
+
+    scheduleBackup();
+    schedulePruning(fastify.prisma);
     console.log(`\n🚀 Server listening on ${env.API_URL}`);
     console.log(`📊 Health: http://localhost:${env.PORT}/health`);
     console.log(`📋 Ready: http://localhost:${env.PORT}/health/ready\n`);
