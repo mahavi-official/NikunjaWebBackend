@@ -36,8 +36,13 @@ export default fp(async (fastify) => {
       return;
     }
 
-    // For admin and me endpoints, require auth
-    if (path.startsWith("/api/v1/admin/") || path.startsWith("/api/v1/me/")) {
+    // For admin and me endpoints, require auth.
+    // `/api/v1/me` has no trailing slash, so it needs its own check.
+    if (
+      path.startsWith("/api/v1/admin/") ||
+      path.startsWith("/api/v1/me/") ||
+      path === "/api/v1/me"
+    ) {
       const token = extractToken(request);
       if (!token) {
         throw new UnauthorizedError("Missing authorization token");

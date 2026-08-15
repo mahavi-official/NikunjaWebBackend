@@ -6,7 +6,7 @@ class EngagementService {
   async likePost(prisma: PrismaClient, postId: string, userId: string): Promise<void> {
     const post = await prisma.post.findUnique({ where: { id: postId } });
 
-    if (!post) {
+    if (!post || post.status !== "PUBLISHED" || !post.publishedAt || post.publishedAt > new Date()) {
       throw new NotFoundError("Post not found");
     }
 
@@ -44,7 +44,7 @@ class EngagementService {
   ): Promise<Comment> {
     const post = await prisma.post.findUnique({ where: { id: data.postId } });
 
-    if (!post) {
+    if (!post || post.status !== "PUBLISHED" || !post.publishedAt || post.publishedAt > new Date()) {
       throw new NotFoundError("Post not found");
     }
 

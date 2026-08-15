@@ -130,7 +130,7 @@ A content hub for Nikunja Seva Pty Ltd (Australia) — a complete CMS-driven web
 **Files Created:**
 ```
 ✓ prisma/schema.prisma            (1100+ lines, complete model)
-✓ prisma/seed.ts                  (upsert super admin, categories, settings, about page)
+✓ prisma/seed/                    (sample-content seeder; super admin moved to boot — see src/lib/ensureSuperAdmin.ts)
 ✓ prisma/migrations/migration_lock.toml (PostgreSQL lock file)
 ```
 
@@ -149,7 +149,7 @@ A content hub for Nikunja Seva Pty Ltd (Australia) — a complete CMS-driven web
 docker compose up -d postgres
 npm run db:generate
 npm run db:migrate --name init
-npm run db:seed
+npm run seed:content   # optional sample content; super admin is created at boot
 ```
 
 ### Batch 0: Cross-cutting Fixes ✅
@@ -778,8 +778,8 @@ npm run db:migrate --create-only --name add_search_vectors
 # 5. Apply both migrations
 npm run db:migrate
 
-# 6. Seed initial data
-npm run db:seed
+# 6. Optional: sample content (the super admin is created at boot)
+npm run seed:content
 ```
 
 #### Option B: Without Docker (generates SQL only)
@@ -799,7 +799,7 @@ mkdir -p prisma/migrations/20240809000100_add_search_vectors
 # 4. Later, when DB is reachable:
 npm run db:generate
 npm run db:migrate deploy
-npm run db:seed
+# no seed step in production — the super admin is created at boot
 ```
 
 ### Raw SQL for tsvector Triggers
@@ -953,7 +953,7 @@ npm run dev        # Boot server, test /health + /health/ready
    npm run db:migrate --name init
    # Hand-write migration for tsvector triggers (SQL provided above)
    npm run db:migrate
-   npm run db:seed
+   npm run seed:content   # optional sample content
    ```
 
 3. **Start Batch 1:**
@@ -1004,7 +1004,7 @@ npm run dev        # Boot server, test /health + /health/ready
 
 ```
 ✅ prisma/schema.prisma
-✅ prisma/seed.ts
+✅ prisma/seed/
 ✅ prisma/migrations/migration_lock.toml
 ```
 

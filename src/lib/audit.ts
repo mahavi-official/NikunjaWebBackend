@@ -7,12 +7,15 @@ export async function createAuditLog(
   action: string,
   entityType?: string,
   entityId?: string,
-  meta?: Record<string, any>
+  meta?: Record<string, any>,
+  /** Actor override for endpoints that authenticate by cookie, where
+   *  `request.user` is never populated — sign-in, refresh, sign-out. */
+  actorId?: string
 ): Promise<void> {
   try {
     await prisma.auditLog.create({
       data: {
-        userId: request.user?.id,
+        userId: request.user?.id ?? actorId,
         action,
         entityType,
         entityId,
@@ -32,7 +35,7 @@ export async function logAuthEvent(
   userId?: string,
   meta?: Record<string, any>
 ): Promise<void> {
-  await createAuditLog(prisma, request, action, "auth", userId, meta);
+  await createAuditLog(prisma, request, action, "auth", userId, meta, userId);
 }
 
 export async function logContentAction(

@@ -75,6 +75,9 @@ export const AUDIT_ACTIONS = {
   AUTH_LOGOUT: "auth.logout",
   AUTH_LOGOUT_ALL: "auth.logout_all",
   AUTH_REFRESH: "auth.refresh",
+  /// A rotated refresh token was presented again; every session for the
+  /// account was revoked. Worth alerting on.
+  AUTH_REFRESH_REUSE: "auth.refresh_reuse_detected",
 
   POST_CREATE: "post.create",
   POST_UPDATE: "post.update",

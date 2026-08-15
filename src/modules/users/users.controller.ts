@@ -94,6 +94,7 @@ export const usersController = {
             role: u.role,
             status: u.status,
             editorModules: u.editorModules,
+            isProtected: u.isProtected,
             lastLoginAt: u.lastLoginAt,
             createdAt: u.createdAt,
           })),

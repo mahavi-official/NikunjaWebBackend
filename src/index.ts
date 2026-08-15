@@ -2,9 +2,17 @@ import { buildApp } from "@/server";
 import { env } from "@/config/env";
 import { scheduleBackup } from "@/jobs/backup";
 import { schedulePruning } from "@/jobs/pruneAuditLogs";
+import { ensureSuperAdminOrExit } from "@/lib/ensureSuperAdmin";
 
 async function start() {
   const fastify = await buildApp();
+
+  // Runs before listen so the instance never serves traffic without an
+  // administrable account. Idempotent — safe on every restart.
+  await ensureSuperAdminOrExit(fastify.prisma, {
+    info: (msg) => fastify.log.info(msg),
+    error: (msg) => fastify.log.error(msg),
+  });
 
   try {
     await fastify.listen({ port: env.PORT, host: "0.0.0.0" });

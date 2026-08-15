@@ -1,6 +1,7 @@
 import { PrismaClient, ContactMessage } from "@prisma/client";
 import { NotFoundError, ValidationFailedError } from "@/lib/errors";
 import { sendContactNotification } from "@/lib/mailer";
+import { verifyRecaptcha } from "@/lib/recaptcha";
 import { SubmitContactInput, ListMessagesQuery } from "./contact.schema";
 
 class ContactService {
@@ -12,6 +13,8 @@ class ContactService {
     if (data.website) {
       throw new ValidationFailedError("Invalid submission");
     }
+
+    await verifyRecaptcha(data.recaptchaToken, ip);
 
     const message = await prisma.contactMessage.create({
       data: {

@@ -62,6 +62,25 @@ export const engagementController = {
     );
   },
 
+  /**
+   * Moderator view of the same list. Differs from the public one in exactly one
+   * way — hidden comments are included — because a moderator who hides a
+   * comment must still be able to find it in order to restore it.
+   */
+  async listCommentsForModeration(request: FastifyRequest, reply: FastifyReply) {
+    const query = listCommentsSchema.parse(request.query);
+
+    const { comments, total } = await engagementService.listComments(
+      request.server.prisma,
+      query,
+      true
+    );
+
+    return reply.send(
+      successResponse({ comments }, paginationMeta(query.page, query.limit, total))
+    );
+  },
+
   async updateComment(request: FastifyRequest, reply: FastifyReply) {
     const { id } = request.params as { id: string };
     const data = request.body as UpdateCommentInput;

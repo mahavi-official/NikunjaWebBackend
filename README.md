@@ -1,398 +1,189 @@
 # Radhakundah Platform — Backend API
 
-A modern, scalable REST API backend for the Radhakundah content hub — a CMS-driven platform for research publications, articles, blogs, media galleries, and YouTube videos.
+REST API for the Radhakundah content hub: research publications, articles and blogs, image galleries, and YouTube videos. Backend only — the Next.js frontend is a separate deployment sharing a parent domain so the session cookie works across both.
 
-## 📋 Overview
+**Stack:** Node.js + TypeScript · Fastify · Prisma · PostgreSQL · Google OAuth (no passwords) · S3 (public media + private research PDFs) · Postgres full-text search
 
-**Radhakundah Platform** is a comprehensive content management and delivery system built with:
-- **Runtime:** Node.js + TypeScript
-- **HTTP Framework:** Fastify
-- **ORM:** Prisma
-- **Database:** PostgreSQL
-- **Authentication:** Google OAuth only (no passwords)
-- **Storage:** AWS S3 (public CDN + private research PDFs)
-- **Search:** PostgreSQL full-text search (tsvector + GIN indexes)
-- **Deployment:** Stateless, horizontally scalable behind a load balancer
+Interactive API docs live at `/docs` once the server is running. They are generated from the route schemas, so they are always current — this file covers what the docs can't: setup, the security model, and the shape of the codebase.
 
-## 🎯 Project Scope
-
-This repository contains **backend only**. The frontend (Next.js) is a separate deployment in a different repository, both sharing a parent domain for cookie-based session management.
-
-## 📁 Architecture Overview
-
-```
-src/
-├─ config/              # Environment validation, constants
-├─ lib/                 # Shared utilities (errors, response, JWT, OAuth, S3, etc.)
-├─ plugins/             # Fastify plugins (auth, RBAC, CORS, rate-limiting, etc.)
-├─ modules/             # Feature modules (auth, posts, research, gallery, etc.)
-│  ├─ auth/            # Google OAuth, session management
-│  ├─ users/           # Staff + members, whitelisting
-│  ├─ posts/           # Articles + blogs (unified model, split by placement)
-│  ├─ research/        # Research papers, multi-file uploads, gated PDFs
-│  ├─ gallery/         # Segments + images with required alt text
-│  ├─ videos/          # YouTube integration
-│  ├─ media/           # Upload, S3 management, image derivatives
-│  ├─ engagement/      # Likes, comments, view counts
-│  ├─ search/          # Full-text search
-│  └─ [dashboard, contact, newsletter, seo, settings, pages, hero, categories, tags, authors, etc.]
-├─ jobs/                # Background jobs (backup, audit log pruning)
-├─ server.ts           # Fastify app builder
-└─ index.ts            # Entry point, graceful shutdown
-
-prisma/
-├─ schema.prisma       # Complete data model (matching agent.md §6)
-├─ seed.ts             # Initial data seeding
-└─ migrations/         # Database migrations
-```
-
-## 🔐 Authentication & Authorization
-
-### Google OAuth Only
-- **No passwords anywhere** — every user (members, editors, admins, super admin) signs in via Google
-- **Whitelisting flow:** Admin inserts a row with email + role + `WHITELISTED` status. On first Google sign-in, the email matches, `providerId` binds to Google's `sub`, and status becomes `ACTIVE`.
-- **Members:** Auto-created on first Google sign-in with `MEMBER` role (CMS access blocked).
-- **Staff:** Must be explicitly whitelisted; cannot self-register.
-
-### Tokens
-- **Access token:** JWT, 15-minute TTL, contains `{sub, role, editorModules}`
-- **Refresh token:** Opaque 32 random bytes, hashed (SHA-256) in DB, 30-day TTL, rotated on every refresh
-- **Rotation:** Reuse of an already-rotated token revokes the entire session family (security)
-- **Cookie:** httpOnly, Secure, SameSite=Lax, domain-scoped to `.radhakundah.com`
-
-### RBAC (Role-Based Access Control)
-Four hardcoded roles (no editable permissions table):
-- **SUPER_ADMIN:** Full access, protected from deletion/demotion, seeded at first boot
-- **ADMIN:** Content CRUD + publish, staff management, audit logs (read-only)
-- **EDITOR:** Content CRUD within assigned modules (`editorModules` array), own content only
-- **MEMBER:** Browse published content, like/comment, view gated research PDFs
-
-Per-module capabilities: View, Create, Edit, Delete, Publish, Unpublish.
-
-## 📡 API Namespaces
-
-All endpoints prefixed with `/api/v1`:
-
-| Namespace | Auth | Cacheable | Purpose |
-|-----------|------|-----------|---------|
-| `/public/*` | none | yes | Published content only, CDN-friendly |
-| `/auth/*` | mixed | no | OAuth, refresh, logout |
-| `/me/*` | member+ | no | Profile, likes, comments, gated PDFs |
-| `/admin/*` | staff | no | Full CMS (create/read/update/delete/publish) |
-
-## 🗄️ Database Schema
-
-**Highlights:**
-- **Google OAuth only:** `AuthProvider { GOOGLE }`, no password fields anywhere
-- **Content:** `Post` (articles + blogs, unified model), `Research`, `Gallery` (segments → images), `Video` (YouTube), `Page` (About singleton)
-- **Taxonomy:** `Category` (scoped: ARTICLE/BLOG/RESEARCH), `Tag` (shared), `VideoCategory` (independent)
-- **Authors:** Separate from `User`; supports co-authors with ordering and corresponding-author flag
-- **Media:** Centralized S3 bucket management with CDN support
-- **SEO:** Inline on every public entity (`metaTitle`, `metaDescription`, `ogImageId`, `noIndex`, etc.)
-- **Full-text search:** `tsvector` columns on `Post` and `Research`, maintained by triggers, GIN indexes
-- **Audit trail:** Every write action and auth event logged with actor, IP, entity, action
-- **Sessions:** Hashed refresh tokens for true revocation
-
-See `prisma/schema.prisma` for the complete model and `agent.md` §6 for design rationale.
-
-## 🚀 Getting Started
-
-### Prerequisites
-- Node.js 18+
-- PostgreSQL 14+
-- Docker (optional, for `docker-compose postgres`)
-- AWS S3 credentials (optional if running locally without file uploads)
-
-### Installation
+## Quick start
 
 ```bash
-# Clone the repo
-git clone https://github.com/mahavi-official/NikunjaWebBackend.git
-cd NikunjaWebBackend
-
-# Install dependencies
 npm install
+cp .env.example .env          # fill in the values, see "Configuration"
 
-# Set up environment
-cp .env.example .env
-# Edit .env with your settings (see "Environment Variables" section below)
-
-# Start local Postgres (if using Docker)
-docker compose up -d postgres
-# Wait for healthcheck to pass
-
-# Generate Prisma client
+docker compose up -d postgres # or point DATABASE_URL at your own
 npm run db:generate
-
-# Run migrations
 npm run db:migrate
 
-# Seed initial data (super admin, categories, settings)
-npm run db:seed
-
-# Start dev server
-npm run dev
+npm run dev                   # http://localhost:4000
+npm run seed:content          # optional: sample content to develop against
 ```
 
-Server boots at `http://localhost:4000` (or your configured `PORT`).
+Health probes: `GET /health` (liveness, no DB) and `GET /health/ready` (runs `SELECT 1`, answers 503 while Postgres is unreachable).
 
-### Health Checks
-- **Liveness:** `GET /health` → `{ status: "ok", timestamp }`
-- **Readiness:** `GET /health/ready` → `{ status: "ready" }` (confirms DB connection)
+## Configuration
 
-### Swagger Documentation
-Once the server is running, visit `http://localhost:4000/docs` for interactive API documentation.
+Every variable is listed with a working default in **`.env.example`**, and `src/config/env.ts` validates them at startup — the process refuses to boot if one is missing or malformed. Rather than repeat the list here, the ones that need a decision:
 
-## 📝 Environment Variables
+| Variable | Why it matters |
+|---|---|
+| `SUPER_ADMIN_EMAIL` / `_NAME` | The account created at every boot. Use a Google address you control — sign-in is OAuth only. |
+| `COOKIE_DOMAIN`, `COOKIE_SECURE` | Must cover both frontend and API hosts (`.radhakundah.com`). Locally use `.localhost` and `false`. |
+| `SITE_URL` | Where the OAuth callback redirects after sign-in, and the base for canonical URLs and sitemaps. |
+| `JWT_ACCESS_SECRET` | 32 characters minimum, enforced. |
+| `S3_*` | Placeholders are fine locally; only uploads and PDF downloads fail without real ones. |
+| `RECAPTCHA_SECRET` | Optional. Left empty, the contact form falls back to its honeypot and rate limit. |
 
-Copy `.env.example` to `.env` and fill in:
+## Authentication
+
+**Google OAuth only — there are no passwords anywhere, for any role.**
+
+- **Members** are created automatically on first Google sign-in, with the `MEMBER` role and no CMS access.
+- **Staff** must be whitelisted first: an admin creates the user row with an email, a role, and status `WHITELISTED`. On that person's first sign-in the email matches, Google's `sub` binds to `providerId`, and the status flips to `ACTIVE`. Staff cannot self-register.
+- **The super admin** is upserted at every boot from `SUPER_ADMIN_EMAIL` (`src/lib/ensureSuperAdmin.ts`), so no environment can exist without an administrable account. Its role, `ACTIVE` status, and `isProtected` flag are re-asserted on each start, and a protected account cannot be deleted or demoted by anyone else. If that write fails the process exits rather than serving an unmanageable API.
+
+### Tokens
+
+| | |
+|---|---|
+| **Access token** | JWT, 15-minute TTL, carries `{sub, role, editorModules}`. Sent as `Authorization: Bearer …`. |
+| **Refresh token** | 32 random bytes, sent to the browser in an httpOnly cookie; the database stores only its SHA-256 hash, so a database leak yields no usable credential. |
+| **Rotation** | Every refresh revokes the old session and issues a new token. |
+| **Reuse detection** | Presenting an already-rotated token revokes *every* live session for that account and writes an `auth.refresh_reuse_detected` audit row — worth alerting on. |
+| **Cookie** | httpOnly, `SameSite=Lax`, `Secure` per `COOKIE_SECURE`, scoped to `/api/v1/auth` on `COOKIE_DOMAIN`. |
+
+### Roles
+
+Four hardcoded roles; there is no editable permissions table.
+
+- **SUPER_ADMIN** — everything, and protected from deletion or demotion.
+- **ADMIN** — content CRUD and publishing, staff management, audit logs.
+- **EDITOR** — content CRUD limited to the modules listed in `editorModules`.
+- **MEMBER** — browse published content, like and comment, open gated research PDFs.
+
+Route guards are `requireRole(...)` and `requirePermission(...module)` from `src/plugins/rbac.ts`. Note that EDITOR access is **module-scoped, not record-scoped**: an editor with the `posts` module may edit any post, not only their own.
+
+## API layout
+
+Everything sits under `/api/v1`:
+
+| Namespace | Auth | Purpose |
+|---|---|---|
+| `/public/*` | none | Published content only. Cacheable, CDN-friendly. |
+| `/auth/*` | mixed | Google sign-in, refresh, logout. |
+| `/me/*` | member+ | Own profile, likes, comments, presigned research PDFs. |
+| `/admin/*` | staff | Full CMS. |
+
+**Response envelope** — success `{ success: true, data, meta? }` (`meta` carries pagination), failure `{ success: false, error: { code, message, details? } }`. Services throw typed `AppError` subclasses; the error-handler plugin turns them into that envelope and never leaks a stack trace in production.
+
+**Rate limits** — 100 requests/minute per IP globally, 30/minute on search, 3/hour on contact and newsletter submissions. Over the limit returns `429` with code `RATE_LIMITED`.
+
+## Data model
+
+`prisma/schema.prisma` is the reference and is commented throughout. The parts worth knowing before reading it:
+
+- **Posts and blogs are one model.** `Post.placement` is `ARTICLE`, `BLOG`, or `BOTH`. Slugs are globally unique, so every post has exactly one canonical URL: `/articles/{slug}`, except `BLOG` placement which lives at `/blogs/{slug}`. A `BOTH` post appears in both listings, and `/blogs/{slug}` is 301-redirected to the article URL — the redirect row is written automatically on create and on slug change.
+- **Authors are not users.** A paper's author needs no account; `ResearchAuthor` carries byline order and the corresponding-author flag.
+- **Research PDFs live in a private bucket** and are never given a public URL. Signed-in users get a 60-second presigned URL, and every open is recorded in `ResearchView`.
+- **Taxonomy:** `Category` is scoped (ARTICLE/BLOG/RESEARCH), `Tag` is shared between posts and research, `VideoCategory` is independent.
+- **SEO columns are inline** on every publicly indexable entity (`metaTitle`, `metaDescription`, `ogImageId`, `noIndex`, …).
+- **Search vectors** are `tsvector` columns on `Post` and `Research`, maintained by database triggers, with GIN indexes.
+- **Sessions** store hashed refresh tokens, so revocation is real.
+- **`AuditLog`** records CMS writes and auth events with actor, IP, entity, and action.
+
+## Seeding
+
+Seeding is never part of `npm run build` — a build produces an artefact and has no database, while seeding acts on one specific database.
+
+**The super admin is not seeded at all.** It is upserted at boot, in every environment, so there is nothing to remember to run.
+
+Everything else is sample content, behind one command:
 
 ```bash
-# Environment
-NODE_ENV=development
-PORT=4000
-LOG_LEVEL=info
-
-# API & Site URLs
-API_URL=http://localhost:4000
-SITE_URL=http://localhost:3000
-CORS_ORIGINS=http://localhost:3000
-
-# Database
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/radhakundah
-
-# JWT & Auth
-JWT_ACCESS_SECRET=your-super-secret-jwt-access-key-minimum-32-characters-long
-JWT_ACCESS_TTL=15m
-REFRESH_TOKEN_TTL_DAYS=30
-COOKIE_DOMAIN=.localhost
-COOKIE_SECURE=false
-
-# Google OAuth
-GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET=your-google-client-secret
-GOOGLE_CALLBACK_URL=http://localhost:4000/api/v1/auth/google/callback
-
-# Super Admin (seeded on first run)
-SUPER_ADMIN_EMAIL=admin@radhakundah.com
-SUPER_ADMIN_NAME=Super Admin
-
-# SMTP (Gmail App Password)
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=your-email@gmail.com
-SMTP_PASS=your-app-password
-MAIL_FROM="Radhakundah <no-reply@radhakundah.com>"
-CONTACT_NOTIFY_TO=contact@radhakundah.com
-
-# S3
-S3_REGION=us-east-1
-S3_BUCKET_PUBLIC=radhakundah-media
-S3_BUCKET_PRIVATE=radhakundah-research
-S3_ACCESS_KEY_ID=your-access-key
-S3_SECRET_ACCESS_KEY=your-secret-key
-S3_PUBLIC_BASE_URL=https://cdn.radhakundah.com
-SIGNED_URL_TTL_SECONDS=60
-
-# Backup
-BACKUP_ENABLED=true
-BACKUP_CRON=0 2 */3 * *
-BACKUP_S3_BUCKET=radhakundah-backups
-BACKUP_RETENTION_DAYS=90
-
-# Security
-RECAPTCHA_SECRET=
-PREVIEW_TOKEN_TTL_MINUTES=30
+npm run seed:content          # idempotent — safe to re-run
+npm run seed:content:clean    # removes only what the seeder created
 ```
 
-**Note:** For local development without AWS S3, use placeholders for S3 variables; the app won't crash, only file uploads will fail gracefully.
+`prisma/seed/` holds `data.ts` (the content), `content.ts` (seed and clean logic), and `index.ts` (the CLI). It fills every public endpoint — posts, research with bylines and file metadata, videos, galleries, authors, hero slides, settings, the About page, plus members, comments, likes, contact messages, subscribers, redirects, and audit rows.
 
-## 📚 Development Workflow
+Some rows exist specifically to prove the visibility filters work: a draft post, a post dated a week into the future, a draft paper, a draft video, an unpublished gallery segment, a hidden comment, and an inactive hero slide. None of them may appear on a public endpoint or in a sitemap.
 
-### Scripts
+Worth knowing:
+
+- Images point at picsum.photos and research PDFs are metadata only — nothing is uploaded to S3, so the gated download will not resolve a file for seeded papers.
+- YouTube ids are real public videos, chosen so thumbnails and embeds load; their titles here are placeholders.
+- Re-running overwrites seeded rows from `prisma/seed/data.ts`. Content you authored yourself is never touched — cleanup matches only `seed-` ids, the `seed/` media prefix, and the seeded slugs.
+- `clean` leaves site settings and the About page in place; they are configuration, not sample content.
+- It refuses to run when `NODE_ENV=production` unless you pass `--force`.
+
+## Search
+
+Postgres-native full-text search, no external engine. Ranking is weighted: title (A), excerpt or abstract (B), body or extracted PDF text (C).
+
+```
+GET /api/v1/public/search?q=manuscript&type=post&page=1&limit=20
+```
+
+`type` is `post`, `research`, `video`, or `all` (default). Only published content is searchable.
+
+## SEO
+
+Every public detail endpoint returns a resolved `seo` object beside the entity — title, description, canonical URL, robots directive, Open Graph block, and a `jsonLd` array holding a breadcrumb trail plus, where the entity has one, its structured data (`Article` for posts, `ScholarlyArticle` for research, `VideoObject` for videos). Fallbacks are already applied, so the frontend renders what it is given.
+
+Sitemaps: `/sitemap.xml` is an index pointing at `/sitemaps/{type}-{page}.xml`, up to 5,000 URLs per file, cached an hour. Drafts, future-dated items, and `noIndex` entities are excluded. `/api/v1/public/redirects?path=…` backs the frontend's 301 middleware.
+
+## Working on the code
 
 ```bash
-npm run dev              # Start dev server with hot reload (tsx watch)
-npm run build            # Compile TypeScript to dist/
-npm start                # Run compiled server (dist/index.js)
+npm run dev                # hot-reload dev server (tsx watch)
+npm run build              # tsc → dist/
+npm start                  # run the compiled server
 
-npm run db:generate      # Generate Prisma client after schema changes
-npm run db:migrate       # Create and apply a new migration
-npm run db:seed          # Run seed script (idempotent)
-npm run db:studio        # Launch Prisma Studio (visual DB browser)
+npm run db:generate        # regenerate the Prisma client after schema edits
+npm run db:migrate         # create and apply a migration
+npm run db:studio          # visual database browser
 
-npm run lint             # Run ESLint
-npm run format           # Format code with Prettier
-npm test                 # Run vitest unit tests
-npm run test:coverage    # Generate coverage report
+npm run seed:content       # sample content (idempotent)
+npm run seed:content:clean # remove it again
+
+npm run lint               # eslint
+npm run format             # prettier
 ```
 
-### Code Structure & Patterns
+Most feature modules under `src/modules/` are four files — `*.schema.ts` (Zod), `*.service.ts` (Prisma and business logic, no HTTP), `*.controller.ts` (thin translation), `*.routes.ts` (registration per namespace). Simpler modules omit what they don't need: `home` is routes only, `search`, `seo`, and `dashboard` are routes plus service. `categories` is the cleanest template to copy. Register new modules in `src/server.ts`.
 
-Every feature module follows **exactly four files** (agent.md §5):
+Request flow is `route → controller → service → Prisma`. Keep HTTP concerns out of services and Prisma out of controllers.
 
-```
-src/modules/categories/
-├─ categories.schema.ts      # Zod validation schemas
-├─ categories.service.ts     # Business logic, Prisma queries
-├─ categories.controller.ts  # HTTP ↔ service translation
-└─ categories.routes.ts      # Route registration per namespace
-```
+## Deployment
 
-**Request flow:**
-```
-HTTP request → route handler → controller → service → Prisma → DB
-         ↓         ↓            ↓           ↓        ↓
-      params/   envelope   translate    domain    data
-      body    middleware   data types   logic     access
-```
+1. Set the environment variables on the platform; the app validates them at boot and exits if any are missing.
+2. Apply migrations as an explicit release step, never at boot: `npx prisma migrate deploy`.
+3. `npm run build && npm start`.
+4. Terminate TLS at Nginx or an ALB in front of port 4000.
+5. Scale horizontally as needed — the process is stateless, with sessions in Postgres and files in S3.
 
-**Error handling:**
-- Service throws typed `AppError` subclasses (`NotFoundError`, `ForbiddenError`, etc.)
-- Error handler plugin catches them, formats to universal envelope: `{ success: false, error: { code, message, details } }`
-- Stack traces never leave server in production
+Backups run in-process via `node-cron`: `pg_dump` → gzip → S3, every three days, 90-day retention, all configurable through `BACKUP_*`. Audit logs are pruned weekly. Both are driven by `src/jobs/`.
 
-**Response envelope:**
-- Success: `{ success: true, data, meta? }` where `meta` = pagination info if applicable
-- Failure: `{ success: false, error: { code, message, details? } }`
+Monitoring hooks: `/health` and `/health/ready` for probes, structured JSON logs via pino, and the `AuditLog` table for an action trail.
 
-### Adding a New Content Module
+## Known gaps
 
-Use the `categories` module (simplest CRUD) as a reference template. To add a new module:
+Honest list, so nobody plans around something that isn't there:
 
-1. Create four files under `src/modules/newmodule/`
-2. Define Zod schemas in `*.schema.ts`
-3. Implement service class in `*.service.ts` (Prisma only, no HTTP concerns)
-4. Implement controller functions in `*.controller.ts` (thin translation layer)
-5. Export route-registration functions in `*.routes.ts` (one per namespace: public, me, admin)
-6. Register in `server.ts`: `app.register(newmodulePublicRoutes, { prefix: ... })`
+- **No automated tests.** `vitest` and `supertest` are installed, but no test files exist — `npm test` exits with "No test files found".
+- **EDITOR permissions are module-scoped, not record-scoped** — see the Roles section.
+- **`src/modules/auth/auth.service.ts` is unused.** The live implementation is `auth.controller.ts`; the service is a parallel copy nothing imports, and should be deleted or adopted rather than left to drift.
+- **Related content is not implemented.** Detail endpoints return the entity and its `seo` block only.
+- **reCAPTCHA fails open.** If Google is unreachable the submission is allowed through, backed by the honeypot and rate limit; only a token Google actively rejects is refused.
 
-See `IMPLEMENTATION.md` for detailed examples.
+## Documentation
 
-## 🔍 Full-Text Search
+- **`/docs`** — interactive Swagger UI, generated from the route schemas
+- **`prisma/schema.prisma`** — the data model, commented
+- **`agent.md`** — the original specification and design rationale
+- **`IMPLEMENTATION.md`** — build log and reference patterns
 
-PostgreSQL-native FTS with weighted ranking:
-- **Title:** weight A (highest)
-- **Excerpt/Abstract:** weight B
-- **Body/Content/Extracted PDF text:** weight C (lowest)
-
-Implemented via `tsvector` columns maintained by triggers on write. No external search engine (Meilisearch, Typesense, Elasticsearch) required.
-
-Queries:
-```bash
-GET /api/v1/public/search?q=kubernetes&type=posts&page=1&limit=20
-```
-
-## 🖼️ SEO & Content Delivery
-
-### Canonical URLs
-Every published item has exactly one canonical URL per agent.md §3.1:
-- Posts (ARTICLE or BOTH): `/articles/{slug}`
-- Posts (BLOG): `/blogs/{slug}`
-- Research: `/research/{slug}`
-- Videos: `/videos/{slug}`
-- Gallery segments: `/gallery/{slug}`
-- Authors: `/authors/{slug}`
-
-Posts with `placement = BOTH` appear in both article and blog listings, but `/blogs/{slug}` 301-redirects to `/articles/{slug}`, consolidating link equity.
-
-### Metadata & Open Graph
-Every detail endpoint returns a resolved `seo` object with fallbacks already applied:
-```json
-{
-  "post": { ... },
-  "seo": {
-    "title": "Post Title",
-    "description": "...",
-    "canonical": "https://radhakundah.com/articles/my-post",
-    "robots": "index,follow",
-    "openGraph": {
-      "title": "...",
-      "description": "...",
-      "image": "https://cdn.radhakundah.com/og-image.png",
-      "type": "article",
-      "url": "..."
-    },
-    "jsonLd": [ /* structured data */ ]
-  },
-  "breadcrumbs": [ ... ],
-  "related": [ ... ]
-}
-```
-
-### Sitemaps
-- `/sitemap.xml` — index pointing to paginated sitemaps
-- `/sitemaps/posts-1.xml`, `/sitemaps/research-1.xml`, etc. — 5,000 URLs per file
-- Excludes unpublished, `noIndex`, and future-dated items
-- Cached 1 hour
-
-## 📦 Deployment
-
-### Production Environment
-
-1. **Environment variables:** Set all required env vars (see "Environment Variables" section) in your deployment platform (GitHub Actions secrets, AWS Parameter Store, etc.)
-
-2. **Database migrations:** Run migrations as an explicit deployment step, **never** auto-apply at boot:
-   ```bash
-   npm run db:migrate -- --deploy  # or npx prisma migrate deploy
-   ```
-
-3. **Build & start:**
-   ```bash
-   npm run build
-   npm start
-   ```
-
-4. **Reverse proxy:** Put Nginx/ALB in front with TLS termination, pointing to the backend on `localhost:4000`
-
-5. **Backup:** `pg_dump` → gzip → S3 every 3 days, 90-day retention (automated via `node-cron` in the app)
-
-6. **Monitoring:**
-   - Health checks: `/health` (liveness), `/health/ready` (readiness)
-   - Logs: structured JSON via pino, forward to your logging service
-   - Audit trail: every CMS action and auth event in `AuditLog` table
-
-### Scaling
-
-The backend is **stateless** — sessions stored in Postgres, files in S3. Scale horizontally behind a load balancer with no changes.
-
-## 📋 Project Status
-
-### ✅ Completed
-- **Phase 1:** Foundation (Fastify, config, plugins, health checks, Swagger)
-- **Phase 2:** Database schema (complete Prisma schema matching spec)
-- **Batch 0:** Cross-cutting fixes (crypto, error handling, plugin wrapping, ZodTypeProvider)
-
-### 🚧 In Progress / TODO
-- **Batch 1:** Shared utilities and core plugins
-- **Batch 2:** Auth routes/controller, users module
-- **Batch 3–10:** Content modules and SEO (see IMPLEMENTATION.md for full plan)
-
-See `IMPLEMENTATION.md` for the detailed build plan.
-
-## 📖 Documentation
-
-- **`agent.md`** — Complete spec: design decisions, schema, endpoints, all 11 phases (1600+ lines)
-- **`IMPLEMENTATION.md`** — Build plan, execution order, reference patterns, activities to date
-- **`README.md`** (this file) — Project overview, getting started, deployment
-- **`prisma/schema.prisma`** — Full data model with inline comments
-- **Swagger UI** — Interactive API docs at `/docs` once server is running
-
-## 🤝 Contributing
-
-1. Create a feature branch off `main` (do not commit to `main` directly)
-2. Follow the module pattern (four files per feature)
-3. Run `npm run lint` and `npm run format` before committing
-4. Write service-layer unit tests for branching logic
-5. Test modules through Swagger UI before merging
-6. Ensure `npm run build` and type-checking (`npx tsc --noEmit`) pass
-
-## 📄 License
+## License
 
 Proprietary — Nikunja Seva Pty Ltd & Mahavi Pvt Ltd.
-
----
-
-**Built with:** Fastify, Prisma, PostgreSQL, TypeScript, Node.js  
-**Deployed to:** AWS (or your infrastructure)  
-**Questions or issues?** See `IMPLEMENTATION.md` for build status and contributor guide.

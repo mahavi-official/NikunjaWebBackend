@@ -125,8 +125,8 @@
 - ✅ Videos: YouTube-only with auto-thumbnail
 - ✅ Refresh tokens hashed, revocable
 
-**`prisma/seed.ts`** — Idempotent seeding
-- Super admin creation (protected from deletion)
+**`prisma/seed/`** — Idempotent sample-content seeder (`npm run seed:content`)
+- Super admin is NOT seeded here — it is upserted at every boot by `src/lib/ensureSuperAdmin.ts`
 - Default categories (Article, Blog, Research scopes)
 - Default video categories
 - Site settings
@@ -215,7 +215,7 @@ src/modules/auth/auth.service.ts    ← Google OAuth, sessions, refresh
 ### Database (2 files)
 ```
 prisma/schema.prisma      ← Complete data model (1100+ lines)
-prisma/seed.ts            ← Initial data seeding
+prisma/seed/              ← Sample content seeder
 ```
 
 ### Documentation (3 files)
@@ -266,7 +266,7 @@ npm run db:generate
 npm run db:migrate --name init
 # Hand-write migration for tsvector triggers (SQL provided in IMPLEMENTATION.md)
 npm run db:migrate
-npm run db:seed
+npm run seed:content   # optional sample content
 ```
 
 ---
@@ -340,7 +340,7 @@ npm run format
 docker compose up -d postgres
 npm run db:generate
 npm run db:migrate --name init
-npm run db:seed
+npm run seed:content   # optional sample content
 
 # Dev server
 npm run dev

@@ -7,7 +7,7 @@ export async function generateUniqueSlug(
   entityType: "post" | "research" | "author" | "category" | "tag" | "video" | "gallerySegment" | "videoCategory",
   excludeId?: string
 ): Promise<string> {
-  let baseSlug = slugify(title, { lower: true, strict: true });
+  const baseSlug = slugify(title, { lower: true, strict: true });
   let slug = baseSlug;
   let counter = 1;
 

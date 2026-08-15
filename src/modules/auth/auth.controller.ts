@@ -4,6 +4,30 @@ import { generateAccessToken, generateRefreshToken, hashToken } from "@/lib/jwt"
 import { successResponse } from "@/lib/response";
 import { exchangeCodeForTokens, getGoogleProfile, getGoogleAuthUrl } from "@/lib/oauth";
 import { logAuthEvent } from "@/lib/audit";
+import { AUDIT_ACTIONS } from "@/config/constants";
+
+const REFRESH_COOKIE = "refreshToken";
+const REFRESH_COOKIE_PATH = "/api/v1/auth";
+
+/**
+ * The cookie carries the raw refresh token; the database stores only its
+ * SHA-256 hash. Anything that reads the cookie must hash it before looking the
+ * session up — never compare the cookie value to `tokenHash` directly, or the
+ * stored hash becomes a usable credential and hashing buys nothing.
+ */
+function refreshCookieOptions(maxAgeSeconds: number) {
+  return {
+    domain: env.COOKIE_DOMAIN,
+    path: REFRESH_COOKIE_PATH,
+    httpOnly: true,
+    secure: env.COOKIE_SECURE,
+    sameSite: "lax" as const,
+    maxAge: maxAgeSeconds,
+  };
+}
+
+const refreshTokenMaxAge = () => env.REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60;
+const refreshTokenExpiry = () => new Date(Date.now() + refreshTokenMaxAge() * 1000);
 
 export const authController = {
   async googleStart(_request: FastifyRequest, reply: FastifyReply) {
@@ -46,12 +70,16 @@ export const authController = {
           provider: "GOOGLE",
         });
       } else if (!user.providerId) {
+        // First sign-in against a row an admin created ahead of time. Binding
+        // the Google subject is what completes the whitelist: the account is
+        // only ACTIVE once the invited address has actually authenticated.
         user = await request.server.prisma.user.update({
           where: { id: user.id },
           data: {
             provider: "GOOGLE",
             providerId: profile.sub,
             avatarUrl: profile.picture,
+            status: user.status === "WHITELISTED" ? "ACTIVE" : user.status,
             lastLoginAt: new Date(),
           },
         });
@@ -64,7 +92,6 @@ export const authController = {
 
       const refreshTokenStr = generateRefreshToken();
       const tokenHash = hashToken(refreshTokenStr);
-      const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
       await request.server.prisma.session.create({
         data: {
@@ -72,7 +99,7 @@ export const authController = {
           tokenHash,
           ip: request.ip,
           userAgent: request.headers["user-agent"],
-          expiresAt,
+          expiresAt: refreshTokenExpiry(),
         },
       });
 
@@ -82,14 +109,7 @@ export const authController = {
         provider: "GOOGLE",
       });
 
-      reply.setCookie("refreshToken", tokenHash, {
-        domain: env.COOKIE_DOMAIN,
-        path: "/api/v1/auth",
-        httpOnly: true,
-        secure: env.COOKIE_SECURE,
-        sameSite: "lax",
-        maxAge: 30 * 24 * 60 * 60,
-      });
+      reply.setCookie(REFRESH_COOKIE, refreshTokenStr, refreshCookieOptions(refreshTokenMaxAge()));
 
       return reply.redirect(`${env.SITE_URL}/auth/callback?token=${accessToken}`);
     } catch (error) {
@@ -107,10 +127,39 @@ export const authController = {
 
     try {
       const session = await request.server.prisma.session.findUnique({
-        where: { tokenHash: refreshToken },
+        where: { tokenHash: hashToken(refreshToken) },
       });
 
-      if (!session || session.revokedAt) {
+      if (!session) {
+        return reply.status(401).send({ error: "Invalid or revoked session" });
+      }
+
+      // A token that was already rotated away is being presented again. Either
+      // it leaked, or a copy of it did — there is no way to tell which holder
+      // is legitimate, so every session for the account is revoked and both
+      // parties are forced to sign in again.
+      if (session.revokedAt) {
+        await request.server.prisma.session.updateMany({
+          where: { userId: session.userId, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+
+        await logAuthEvent(
+          request.server.prisma,
+          request,
+          AUDIT_ACTIONS.AUTH_REFRESH_REUSE,
+          session.userId,
+          { sessionId: session.id }
+        );
+
+        reply.clearCookie(REFRESH_COOKIE, {
+          domain: env.COOKIE_DOMAIN,
+          path: REFRESH_COOKIE_PATH,
+        });
+        return reply.status(401).send({ error: "Invalid or revoked session" });
+      }
+
+      if (session.expiresAt < new Date()) {
         return reply.status(401).send({ error: "Invalid or revoked session" });
       }
 
@@ -123,8 +172,6 @@ export const authController = {
       }
 
       const newRefreshToken = generateRefreshToken();
-      const newTokenHash = hashToken(newRefreshToken);
-      const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
       await request.server.prisma.session.update({
         where: { id: session.id },
@@ -134,23 +181,16 @@ export const authController = {
       await request.server.prisma.session.create({
         data: {
           userId: user.id,
-          tokenHash: newTokenHash,
+          tokenHash: hashToken(newRefreshToken),
           ip: request.ip,
           userAgent: request.headers["user-agent"],
-          expiresAt,
+          expiresAt: refreshTokenExpiry(),
         },
       });
 
       const accessToken = generateAccessToken(user.id, user.role, user.editorModules);
 
-      reply.setCookie("refreshToken", newTokenHash, {
-        domain: env.COOKIE_DOMAIN,
-        path: "/api/v1/auth",
-        httpOnly: true,
-        secure: env.COOKIE_SECURE,
-        sameSite: "lax",
-        maxAge: 30 * 24 * 60 * 60,
-      });
+      reply.setCookie(REFRESH_COOKIE, newRefreshToken, refreshCookieOptions(refreshTokenMaxAge()));
 
       return reply.send(
         successResponse({
@@ -178,7 +218,7 @@ export const authController = {
 
     try {
       const session = await request.server.prisma.session.findUnique({
-        where: { tokenHash: refreshToken },
+        where: { tokenHash: hashToken(refreshToken) },
       });
 
       if (session) {

@@ -35,6 +35,56 @@ import { registerHomeRoutes } from "@/modules/home/home.routes";
 import { registerMeRoutes } from "@/modules/users/me.routes";
 import { env } from "@/config/env";
 import { API_PREFIX } from "@/config/constants";
+import { dateTime, obj, ok, op, str } from "@/schemas/common";
+
+const API_DESCRIPTION = `
+REST API for the Radhakundah content hub.
+
+### Response envelope
+
+Every JSON endpoint answers with one of two shapes.
+
+\`\`\`jsonc
+// success
+{ "success": true, "data": { /* payload */ }, "meta": { /* only on list endpoints */ } }
+
+// failure
+{ "success": false, "error": { "code": "NOT_FOUND", "message": "Post not found", "details": [] } }
+\`\`\`
+
+\`error.code\` is one of \`VALIDATION_FAILED\`, \`UNAUTHORIZED\`, \`FORBIDDEN\`, \`NOT_FOUND\`,
+\`CONFLICT\`, \`RATE_LIMITED\`, \`INTERNAL_ERROR\`. \`details\` is only present on validation
+failures and lists every offending field.
+
+### Route families
+
+| Prefix | Who can call it |
+| --- | --- |
+| \`/api/v1/public/*\` | Anyone. No token. Only published content. |
+| \`/api/v1/auth/*\` | Anyone. Sign-in and session lifecycle. |
+| \`/api/v1/me/*\` | Any signed-in user. Acts on your own account. |
+| \`/api/v1/admin/*\` | Staff. Each route lists the role or editor module it needs. |
+
+### Authentication
+
+Sign-in is Google OAuth only — there are no passwords. Send the browser to
+\`GET /api/v1/auth/google\`; after consent the API sets an httpOnly \`refreshToken\` cookie and
+redirects to \`{SITE_URL}/auth/callback?token=<accessToken>\`. Send that token on every
+guarded call as \`Authorization: Bearer <token>\`. It lasts 15 minutes — call
+\`POST /api/v1/auth/refresh\` (cookie-authenticated) for a new one.
+
+Use the **Authorize** button above to try guarded endpoints from this page.
+
+### Pagination
+
+List endpoints take \`page\` (1-based) and \`limit\`, and return counters in \`meta\`:
+\`{ page, limit, total, totalPages }\`.
+
+### Rate limits
+
+100 requests/minute per IP globally. Contact and newsletter submissions allow 3/hour,
+search allows 30/minute. Exceeding a limit returns \`429\` with code \`RATE_LIMITED\`.
+`.trim();
 
 export async function buildApp() {
   const fastify = Fastify({
@@ -42,6 +92,14 @@ export async function buildApp() {
     requestIdLogLabel: "req.id",
     disableRequestLogging: false,
     requestTimeout: 30000,
+    ajv: {
+      customOptions: {
+        // `example` is an OpenAPI annotation, not a validation rule. Request
+        // schemas carry it so Swagger UI can pre-fill "Try it out"; ajv runs
+        // in strict mode and would otherwise reject the unknown keyword.
+        keywords: ["example"],
+      },
+    },
   }).withTypeProvider<ZodTypeProvider>();
 
   await fastify.register(errorHandlerPlugin);
@@ -55,45 +113,149 @@ export async function buildApp() {
   await fastify.register(authPlugin);
   await fastify.register(rbacPlugin);
   await fastify.register(swagger, {
-    swagger: {
+    openapi: {
+      openapi: "3.0.3",
       info: {
         title: "Radhakundah Platform API",
-        description: "REST API for the Radhakundah content hub",
+        description: API_DESCRIPTION,
         version: "1.0.0",
       },
-      host: env.API_URL.replace(/https?:\/\//, "").split(":")[0],
-      schemes: [env.API_URL.startsWith("https") ? "https" : "http"],
-      consumes: ["application/json"],
-      produces: ["application/json"],
+      servers: [
+        { url: env.API_URL, description: `${env.NODE_ENV} server` },
+      ],
+      components: {
+        securitySchemes: {
+          bearerAuth: {
+            type: "http",
+            scheme: "bearer",
+            bearerFormat: "JWT",
+            description:
+              "Paste the `accessToken` returned by `/api/v1/auth/refresh` (or the `token` query param the Google callback redirects with). Valid for 15 minutes.",
+          },
+        },
+      },
+      tags: [
+        { name: "Auth", description: "Authentication and session management" },
+        { name: "Users", description: "Admin user management" },
+        { name: "Me", description: "Current user profile" },
+        { name: "Media", description: "Media library uploads" },
+        { name: "Categories", description: "Post categories" },
+        { name: "Tags", description: "Post tags" },
+        { name: "Posts", description: "Blog/article posts" },
+        { name: "Authors", description: "Research authors" },
+        { name: "Research", description: "Research publications" },
+        { name: "Gallery", description: "Image gallery segments" },
+        { name: "Videos", description: "Videos and video categories" },
+        { name: "Engagement", description: "Likes and comments" },
+        { name: "Pages", description: "Static content pages" },
+        { name: "Hero", description: "Homepage hero slides" },
+        { name: "Settings", description: "Site settings" },
+        { name: "Contact", description: "Contact form messages" },
+        { name: "Newsletter", description: "Newsletter subscriptions" },
+        { name: "Search", description: "Site-wide search" },
+        { name: "SEO", description: "Redirects and preview tokens" },
+        { name: "Sitemap", description: "XML sitemaps" },
+        { name: "Dashboard", description: "Admin dashboard stats and audit logs" },
+        { name: "Home", description: "Homepage aggregate feed" },
+        { name: "System", description: "Health checks and API metadata" },
+      ],
     },
   });
   await fastify.register(swaggerUi, {
     routePrefix: "/docs",
+    uiConfig: {
+      docExpansion: "list",
+      tagsSorter: "alpha",
+      operationsSorter: "alpha",
+      persistAuthorization: true,
+      displayRequestDuration: true,
+      defaultModelsExpandDepth: 0,
+      defaultModelRendering: "example",
+      tryItOutEnabled: true,
+    },
   });
 
-  fastify.get("/health", async (_request, reply) => {
-    return reply.send({ status: "ok", timestamp: new Date().toISOString() });
-  });
-
-  fastify.get("/health/ready", async (request, reply) => {
-    try {
-      await request.server.prisma.$queryRaw`SELECT 1`;
-      return reply.send({ status: "ready", timestamp: new Date().toISOString() });
-    } catch (error) {
-      return reply.status(503).send({ status: "not ready", error: "Database connection failed" });
+  fastify.get(
+    "/health",
+    {
+      schema: op({
+        tags: ["System"],
+        summary: "Liveness probe",
+        description:
+          "Returns as soon as the process can serve traffic. Does not touch the database — use `/health/ready` for that.",
+        response: {
+          200: obj("The process is up.", {
+            status: str("Always `ok`.", { example: "ok" }),
+            timestamp: dateTime("Server time when the probe ran."),
+          }),
+        },
+      }),
+    },
+    async (_request, reply) => {
+      return reply.send({ status: "ok", timestamp: new Date().toISOString() });
     }
-  });
+  );
 
-  fastify.get(`${API_PREFIX}/`, async (_request, reply) => {
-    return reply.send({
-      success: true,
-      data: {
-        name: "Radhakundah Platform API",
-        version: "1.0.0",
-        environment: env.NODE_ENV,
-      },
-    });
-  });
+  fastify.get(
+    "/health/ready",
+    {
+      schema: op({
+        tags: ["System"],
+        summary: "Readiness probe",
+        description:
+          "Runs `SELECT 1` against Postgres. Answers 503 while the database is unreachable, so load balancers can drain the instance.",
+        response: {
+          200: obj("The database answered.", {
+            status: str("Always `ready`.", { example: "ready" }),
+            timestamp: dateTime("Server time when the probe ran."),
+          }),
+          503: obj("The database did not answer.", {
+            status: str("Always `not ready`.", { example: "not ready" }),
+            error: str("Failure reason.", { example: "Database connection failed" }),
+          }),
+        },
+      }),
+    },
+    async (request, reply) => {
+      try {
+        await request.server.prisma.$queryRaw`SELECT 1`;
+        return reply.send({ status: "ready", timestamp: new Date().toISOString() });
+      } catch (error) {
+        return reply.status(503).send({ status: "not ready", error: "Database connection failed" });
+      }
+    }
+  );
+
+  fastify.get(
+    `${API_PREFIX}/`,
+    {
+      schema: op({
+        tags: ["System"],
+        summary: "API metadata",
+        description: "Name, version, and deployment environment of this API instance.",
+        response: {
+          200: ok(
+            "Metadata about the running API.",
+            obj("API identity.", {
+              name: str("API name.", { example: "Radhakundah Platform API" }),
+              version: str("Semantic version of the deployed build.", { example: "1.0.0" }),
+              environment: str("`development`, `production`, or `test`.", { example: "production" }),
+            })
+          ),
+        },
+      }),
+    },
+    async (_request, reply) => {
+      return reply.send({
+        success: true,
+        data: {
+          name: "Radhakundah Platform API",
+          version: "1.0.0",
+          environment: env.NODE_ENV,
+        },
+      });
+    }
+  );
 
   // Register module routes
   await fastify.register(async (fastify) => {
