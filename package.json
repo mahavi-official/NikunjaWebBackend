@@ -9,6 +9,8 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
+    "postinstall": "tsx scripts/bootstrap-db.ts",
+    "predev": "tsx scripts/bootstrap-db.ts",
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",

@@ -9,16 +9,19 @@ Interactive API docs live at `/docs` once the server is running. They are genera
 ## Quick start
 
 ```bash
-npm install
 cp .env.example .env          # fill in the values, see "Configuration"
-
 docker compose up -d postgres # or point DATABASE_URL at your own
-npm run db:generate
-npm run db:migrate
 
+npm install                   # postinstall migrates the db and seeds sample
+                               # content automatically, on first run only
 npm run dev                   # http://localhost:4000
-npm run seed:content          # optional: sample content to develop against
 ```
+
+`postinstall` and `predev` both run `scripts/bootstrap-db.ts`: it applies pending
+Prisma migrations, then seeds sample content the first time only (skipped if
+already seeded, if `NODE_ENV=production`, or if `DATABASE_URL` isn't set yet —
+it never fails the install). Re-seed or wipe sample content manually anytime
+with `npm run seed:content` / `npm run seed:content:clean`.
 
 Health probes: `GET /health` (liveness, no DB) and `GET /health/ready` (runs `SELECT 1`, answers 503 while Postgres is unreachable).
 
