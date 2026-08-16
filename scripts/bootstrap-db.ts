@@ -60,18 +60,35 @@ async function main() {
 
     // Posts need a staff author. The API upserts this same row at boot
     // (src/lib/ensureSuperAdmin.ts); bootstrap does the minimal equivalent
-    // so seeding works before the server has ever run.
-    await prisma.user.upsert({
-      where: { email: superAdminEmail },
-      update: { role: "SUPER_ADMIN", status: "ACTIVE", isProtected: true },
-      create: {
-        email: superAdminEmail,
-        name: superAdminName,
-        role: "SUPER_ADMIN",
-        status: "ACTIVE",
-        isProtected: true,
-        provider: "GOOGLE",
-      },
+    // so seeding works before the server has ever run. That includes the
+    // single-super-admin invariant: any other holder of the role is demoted
+    // to ADMIN, so seeding can never leave two super admins behind. Kept
+    // inline rather than importing ensureSuperAdmin, which pulls in
+    // src/config/env and its exit-on-first-missing-var validation.
+    await prisma.$transaction(async (tx) => {
+      const superAdmin = await tx.user.upsert({
+        where: { email: superAdminEmail },
+        update: { role: "SUPER_ADMIN", status: "ACTIVE", isProtected: true },
+        create: {
+          email: superAdminEmail,
+          name: superAdminName,
+          role: "SUPER_ADMIN",
+          status: "ACTIVE",
+          isProtected: true,
+          provider: "GOOGLE",
+        },
+      });
+
+      const { count } = await tx.user.updateMany({
+        where: { id: { not: superAdmin.id }, role: "SUPER_ADMIN" },
+        data: { role: "ADMIN", isProtected: false },
+      });
+      if (count > 0) log(`Demoted ${count} previous super admin(s) to ADMIN.`);
+
+      await tx.user.updateMany({
+        where: { id: { not: superAdmin.id }, isProtected: true },
+        data: { isProtected: false },
+      });
     });
 
     log("Seeding sample content (first run)...");
