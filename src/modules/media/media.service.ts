@@ -1,5 +1,9 @@
 import { PrismaClient, Media } from "@prisma/client";
-import { uploadToS3, deleteFromS3, generateS3Key } from "@/lib/s3";
+import {
+  uploadToBlobStorage,
+  deleteFromBlobStorage,
+  generateBlobName,
+} from "@/lib/blob-storage";
 import { generateImageDerivatives, getImageDimensions } from "@/lib/image";
 import { NotFoundError } from "@/lib/errors";
 
@@ -12,7 +16,7 @@ class MediaService {
     folder: string,
     userId: string
   ): Promise<Media> {
-    const s3Key = generateS3Key(folder, fileName);
+    const blobName = generateBlobName(folder, fileName);
     let width: number | null = null;
     let height: number | null = null;
     let variants: any = null;
@@ -30,11 +34,11 @@ class MediaService {
       }
     }
 
-    const url = await uploadToS3("public", s3Key, file, mimeType);
+    const url = await uploadToBlobStorage("public", blobName, file, mimeType);
 
     return prisma.media.create({
       data: {
-        s3Key,
+        blobName,
         url,
         fileName,
         mimeType,
@@ -97,7 +101,7 @@ class MediaService {
   async deleteMedia(prisma: PrismaClient, id: string): Promise<void> {
     const media = await this.getMedia(prisma, id);
 
-    await deleteFromS3("public", media.s3Key);
+    await deleteFromBlobStorage("public", media.blobName);
 
     await prisma.media.delete({
       where: { id },

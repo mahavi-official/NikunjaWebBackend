@@ -63,7 +63,7 @@ It serves four distinct audiences through four namespaces:
 | ORM | Prisma 5 |
 | Database | PostgreSQL 16 |
 | Validation | Zod via `fastify-type-provider-zod` |
-| Object storage | AWS S3 — two buckets (public media, private PDFs) |
+| Object storage | Azure Blob Storage — three containers (public media, private PDFs, backups) |
 | Images | `sharp` |
 | PDF text | `pdf-parse` |
 | Email | Gmail SMTP via `nodemailer` |
@@ -89,13 +89,13 @@ graph TB
         PLUGINS[Plugin chain<br/>cors → helmet → rateLimit → prisma<br/>→ cookie → multipart → auth → rbac]
         ROUTES[Route layer<br/>93 endpoints]
         SERVICES[Service layer<br/>business logic]
-        LIBS[Shared libs<br/>slug · seo · s3 · image · pdf · audit]
+        LIBS[Shared libs<br/>slug · seo · blob-storage · image · pdf · audit]
     end
 
     subgraph External
         PG[(PostgreSQL<br/>+ tsvector FTS)]
-        S3PUB[S3 public bucket<br/>media library]
-        S3PRIV[S3 private bucket<br/>research PDFs + backups]
+        BLOBPUB[Blob container: public<br/>media library]
+        BLOBPRIV[Blob containers: private + backup<br/>research PDFs, DB dumps]
         GOOGLE[Google OAuth]
         SMTP[Gmail SMTP]
         YT[YouTube thumbnails]
@@ -109,14 +109,14 @@ graph TB
     ROUTES --> SERVICES
     SERVICES --> LIBS
     SERVICES --> PG
-    LIBS --> S3PUB
-    LIBS --> S3PRIV
+    LIBS --> BLOBPUB
+    LIBS --> BLOBPRIV
     LIBS --> SMTP
     ROUTES --> GOOGLE
     SERVICES --> YT
 ```
 
-**Key property:** the backend is stateless. Sessions live in Postgres, files in S3. It scales horizontally behind a load balancer with zero code changes.
+**Key property:** the backend is stateless. Sessions live in Postgres, files in Azure Blob Storage. It scales horizontally behind a load balancer with zero code changes.
 
 ---
 
@@ -219,7 +219,7 @@ src/
 │  ├─ oauth.ts                # Google consent URL, code exchange, profile
 │  ├─ slug.ts                 # slugify + uniqueness + redirect-on-change
 │  ├─ sanitize.ts             # rich-text HTML allowlist
-│  ├─ s3.ts                   # upload, presign, delete, key generation
+│  ├─ blob-storage.ts         # upload, SAS sign, delete, blob-name generation
 │  ├─ image.ts                # sharp derivatives (4 sizes × webp/original)
 │  ├─ pdf.ts                  # text extraction for search
 │  ├─ mailer.ts               # SMTP + contact notification
@@ -227,7 +227,7 @@ src/
 │  └─ seo.ts                  # buildSeo() + JSON-LD builders
 │
 ├─ jobs/
-│  ├─ backup.ts               # pg_dump → gzip → S3, every 3 days
+│  ├─ backup.ts               # pg_dump → gzip → blob storage, every 3 days
 │  └─ pruneAuditLogs.ts       # weekly, 12-month retention
 │
 └─ types/                     # ambient .d.ts for nodemailer, pdf-parse
@@ -438,10 +438,10 @@ erDiagram
 | `Session` | refresh-token store, enables real revocation | `tokenHash` (SHA-256), `revokedAt` |
 | `Post` | articles **and** blogs, one model | `placement` (ARTICLE/BLOG/BOTH), globally unique `slug`, `searchVector` |
 | `Research` | papers; the PDF is the body | `abstract`, `extractedText` (never returned), `searchVector` |
-| `ResearchFile` | lives in **private** S3, never public | `s3Key`, `pageCount` |
+| `ResearchFile` | lives in the **private** container, never public | `blobName`, `pageCount` |
 | `ResearchView` | audit trail of who opened which paper | `userId`, `fileId`, `ip` |
 | `Author` | paper author, **not** a User | own indexable page at `/authors/{slug}` |
-| `Media` | public bucket + CDN | `variants` JSON: 4 sizes × webp/original |
+| `Media` | public container + CDN | `variants` JSON: 4 sizes × webp/original |
 | `UrlRedirect` | 301 map for slug changes and BOTH posts | `isAuto` flag protects manual rules |
 | `AuditLog` | every write + every auth event | 12-month retention, pruned weekly |
 
@@ -538,14 +538,14 @@ Next.js middleware queries `GET /api/v1/public/redirects?path=…` on a 404 and 
 
 ## 12. Research: gated PDF access
 
-Research PDFs live in the **private** S3 bucket with all public access blocked at the bucket policy level. They never have a public URL.
+Research PDFs live in the **private** Blob Storage container, whose public access level is set to Private (no anonymous access). They never have a public URL.
 
 ```mermaid
 sequenceDiagram
     participant U as Signed-in user
     participant API as Backend
     participant DB as Postgres
-    participant S3 as Private S3
+    participant BLOB as Private container
 
     Note over U,API: Public detail endpoint first
     U->>API: GET /public/research/{slug}
@@ -557,8 +557,8 @@ sequenceDiagram
         API-->>U: 401 UNAUTHORIZED
     else authorized
         API->>DB: resolve research + file
-        API->>S3: generate presigned GET (60s)
-        S3-->>API: signed url
+        API->>BLOB: generate read-only SAS (60s)
+        BLOB-->>API: signed url
         API->>DB: INSERT ResearchView<br/>{ researchId, userId, fileId, ip }
         API-->>U: { url, fileName }
     end
@@ -568,9 +568,9 @@ sequenceDiagram
 
 "View but not download" is **not technically enforceable** — anything a browser renders can be saved. What is delivered:
 
-- private bucket, public access blocked at **policy** level
+- private container, public access level set to **Private** (no anonymous access)
 - no public URL ever issued
-- **60-second** presigned URLs, only to signed-in users
+- **60-second** SAS URLs, only to signed-in users
 - inline PDF.js viewer with the download/print toolbar removed (frontend)
 - `Content-Disposition: inline`, right-click disabled (frontend)
 
@@ -588,7 +588,7 @@ On upload, `pdf-parse` extracts text into `Research.extractedText`. That column 
 graph LR
     UP[POST /admin/media/upload<br/>multipart] --> BUF[read to Buffer]
     BUF --> IMG{image mime?}
-    IMG -->|no| S3U
+    IMG -->|no| UPL
     IMG -->|yes| DIM[read width/height]
     DIM --> DER[sharp derivatives]
 
@@ -602,14 +602,14 @@ graph LR
     L --> WEBP
     O --> WEBP
 
-    WEBP --> S3U[upload to public bucket<br/>randomised key]
-    S3U --> ROW[insert Media row<br/>variants JSON]
+    WEBP --> UPL[upload to public container<br/>randomised blob name]
+    UPL --> ROW[insert Media row<br/>variants JSON]
     ROW --> AUD[audit log media.upload]
 ```
 
 Derivatives are generated **at upload**, not per request. This serves the client's "optimized images" and fast-loading requirements far better than on-the-fly transformation, and lets a CDN cache everything immutably.
 
-**Limits:** images 10 MB, PDFs 50 MB. S3 keys are randomised (`timestamp-random.ext`).
+**Limits:** images 10 MB, PDFs 50 MB. Blob names are randomised (`timestamp-random.ext`).
 
 ---
 
@@ -782,7 +782,7 @@ graph TD
     B --> BC{BACKUP_ENABLED?}
     BC -->|no| SKIP[skipped]
     BC -->|yes| BCRON["cron: 0 2 */3 * *<br/>02:00 every 3 days"]
-    BCRON --> DUMP[pg_dump] --> GZ[gzip] --> S3[private S3 bucket]
+    BCRON --> DUMP[pg_dump] --> GZ[gzip] --> BLOB[backup blob container]
 
     P --> PCRON["cron: 0 3 * * 0<br/>Sunday 03:00"]
     PCRON --> DEL[delete AuditLog<br/>older than 12 months]
@@ -790,10 +790,10 @@ graph TD
 
 | Job | Schedule | What it does |
 |---|---|---|
-| `backup.ts` | every 3 days, 02:00 | `pg_dump` → gzip → private S3, 90-day retention |
+| `backup.ts` | every 3 days, 02:00 | `pg_dump` → gzip → backup container, 90-day retention |
 | `pruneAuditLogs.ts` | weekly, Sunday 03:00 | deletes audit rows older than 12 months |
 
-**Database dump only** — media already lives in S3.
+**Database dump only** — media already lives in Blob Storage.
 
 > An untested backup is not a backup. The restore procedure must be documented and tested before launch.
 
@@ -880,7 +880,7 @@ Resources: `posts`, `research`, `authors`, `videos`, `video-categories`, `galler
 | POST | `/admin/posts/:id/publish` · `/unpublish` | status transitions |
 | POST | `/admin/posts/:id/preview-token` | 30-min draft-mode token |
 | POST | `/admin/research/:id/publish` · `/unpublish` | status transitions |
-| POST | `/admin/research/:id/files` | PDF upload → private bucket |
+| POST | `/admin/research/:id/files` | PDF upload → private container |
 | DELETE | `/admin/research/files/:fileId` | remove file |
 | POST | `/admin/videos/:id/publish` · `/unpublish` | status transitions |
 | POST | `/admin/gallery/:id/images` | multi-image add |
@@ -940,17 +940,17 @@ SMTP_PASS=                                # Gmail App Password (requires 2FA)
 MAIL_FROM="Radhakundah <no-reply@radhakundah.com>"
 CONTACT_NOTIFY_TO=
 
-S3_REGION=
-S3_BUCKET_PUBLIC=                         # media library
-S3_BUCKET_PRIVATE=                        # research PDFs — block ALL public access
-S3_ACCESS_KEY_ID=
-S3_SECRET_ACCESS_KEY=
-S3_PUBLIC_BASE_URL=                       # CDN in front of the public bucket
+AZURE_STORAGE_ACCOUNT_NAME=
+AZURE_STORAGE_ACCOUNT_KEY=
+AZURE_STORAGE_CONTAINER_PUBLIC=           # media library — anonymous blob read
+AZURE_STORAGE_CONTAINER_PRIVATE=          # research PDFs — access level Private
+AZURE_STORAGE_CONTAINER_BACKUP=           # DB dumps — access level Private
+AZURE_STORAGE_BLOB_ENDPOINT=              # optional; defaults to <account>.blob.core.windows.net
+AZURE_BLOB_PUBLIC_BASE_URL=               # CDN in front of the public container
 SIGNED_URL_TTL_SECONDS=60
 
 BACKUP_ENABLED=true
 BACKUP_CRON="0 2 */3 * *"
-BACKUP_S3_BUCKET=
 BACKUP_RETENTION_DAYS=90
 
 RECAPTCHA_SECRET=                         # optional; captcha inert if empty
@@ -998,8 +998,8 @@ open http://localhost:4000/docs          # Swagger UI, all 93 endpoints
 
 - **Prisma migrations run as an explicit deploy step, never auto-applied at boot.**
 - TLS everywhere, HSTS with preload.
-- Private S3 bucket blocked at the **bucket policy** level, not just object ACLs.
-- Least-privilege IAM — separate credentials for media, private files, and backups.
+- Private containers set to access level **Private** — no anonymous read, no container listing.
+- Least-privilege access — prefer scoped SAS or per-container RBAC over the account key where the deployment allows it.
 
 ---
 
@@ -1031,7 +1031,7 @@ Honest list of what is **not** done.
 | **No automated tests** | no regression safety net | `vitest` + `supertest` are in devDependencies but unused. |
 | **`src/emails/` not created** | none today | The only transactional email (contact notification) is inline in `mailer.ts`. A template directory for one email would be over-engineering per §0 of `agent.md`. Split it out when a second email appears. |
 | **reCAPTCHA escalation not wired** | contact form relies on honeypot + 3/hr limit | `RECAPTCHA_SECRET` is read but the verification call is not implemented. Spec says captcha stays inert until configured — implement when spam appears. |
-| **Backup restore never tested** | ⚠️ **highest-risk item** | The backup job writes to S3, but no restore has been performed. *An untested backup is not a backup.* Do this before launch. |
+| **Backup restore never tested** | ⚠️ **highest-risk item** | The backup job writes to Blob Storage, but no restore has been performed. *An untested backup is not a backup.* Do this before launch. |
 | **Response schemas not declared on routes** | slower serialization; no structural leak guard | Fastify can serialize faster with declared response schemas, and they structurally prevent leaking internal fields. Controllers currently strip sensitive fields (`content` on lists, `extractedText` on research) by hand. |
 | **Editor "own content only" delete** | editors can delete any content in their modules | Spec §3.9 says editors delete *own only*. `requirePermission` checks module access but not ownership. |
 

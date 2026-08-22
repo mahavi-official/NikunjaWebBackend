@@ -51,7 +51,7 @@ export async function seedContent(prisma: PrismaClient, log: Log): Promise<void>
   const mediaUrls = new Map<string, string>();
 
   for (const item of mediaSeed) {
-    const s3Key = `${SEED_MEDIA_PREFIX}${item.folder.replace(/^\//, "")}/${item.fileName}`;
+    const blobName = `${SEED_MEDIA_PREFIX}${item.folder.replace(/^\//, "")}/${item.fileName}`;
     const url = picsum(item.key, item.width, item.height);
     const variants: Prisma.InputJsonValue = {
       thumb: { webp: picsum(item.key, 200, 200, "webp"), original: picsum(item.key, 200, 200) },
@@ -72,9 +72,9 @@ export async function seedContent(prisma: PrismaClient, log: Log): Promise<void>
     };
 
     const row = await prisma.media.upsert({
-      where: { s3Key },
+      where: { blobName },
       update: fields,
-      create: { s3Key, ...fields },
+      create: { blobName, ...fields },
     });
     mediaIds.set(item.key, row.id);
     mediaUrls.set(item.key, row.url);
@@ -285,13 +285,13 @@ export async function seedContent(prisma: PrismaClient, log: Log): Promise<void>
     });
 
     // Metadata only. No PDF is uploaded, so the gated download endpoint will
-    // fail to presign these keys — see the note printed at the end of the run.
+    // sign blob names that do not exist — see the note printed at the end of the run.
     await prisma.researchFile.deleteMany({ where: { researchId: row.id } });
     await prisma.researchFile.create({
       data: {
         researchId: row.id,
         label: paper.fileLabel,
-        s3Key: `${SEED_MEDIA_PREFIX}research/${paper.slug}.pdf`,
+        blobName: `${SEED_MEDIA_PREFIX}research/${paper.slug}.pdf`,
         fileName: `${paper.slug}.pdf`,
         mimeType: "application/pdf",
         sizeBytes: paper.fileSizeBytes,
@@ -605,7 +605,7 @@ export async function cleanContent(prisma: PrismaClient, log: Log): Promise<void
   log(`member accounts ....... ${members} removed`);
 
   const { count: media } = await prisma.media.deleteMany({
-    where: { s3Key: { startsWith: SEED_MEDIA_PREFIX } },
+    where: { blobName: { startsWith: SEED_MEDIA_PREFIX } },
   });
   log(`media ................. ${media} removed`);
 

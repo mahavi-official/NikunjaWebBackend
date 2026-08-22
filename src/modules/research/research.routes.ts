@@ -116,7 +116,7 @@ export async function registerResearchRoutes(fastify: FastifyInstance) {
         description: [
           "The publication with its byline, academic metadata, and a `seo` block carrying `ScholarlyArticle` JSON-LD.",
           "",
-          "`files` lists the attached PDFs by label and size but **carries no URLs** — the PDFs live in a private bucket. A signed-in user gets a 60-second link from `/me/research/{slug}/view-url`.",
+          "`files` lists the attached PDFs by label and size but **carries no URLs** — the PDFs live in a private container. A signed-in user gets a 60-second link from `/me/research/{slug}/view-url`.",
         ].join("\n"),
         params: slugParam("research"),
         response: {
@@ -137,7 +137,7 @@ export async function registerResearchRoutes(fastify: FastifyInstance) {
         tags: TAGS,
         summary: "Get a time-limited PDF link",
         description: [
-          "Issues a presigned S3 URL valid for 60 seconds, then records who opened which file. Any signed-in user may call it — this is the gate that makes research downloads auditable.",
+          "Issues a SAS (shared access signature) URL for the blob, valid for 60 seconds, then records who opened which file. Any signed-in user may call it — this is the gate that makes research downloads auditable.",
           "",
           "Omit `fileId` to get the first attached file.",
         ].join("\n"),
@@ -149,9 +149,10 @@ export async function registerResearchRoutes(fastify: FastifyInstance) {
         response: {
           200: ok(
             "A short-lived download URL.",
-            obj("Presigned link.", {
-              url: str("Presigned S3 URL. Expires 60 seconds after issue.", {
-                example: "https://private-bucket.s3.amazonaws.com/research/paper.pdf?X-Amz-…",
+            obj("Signed link.", {
+              url: str("SAS-signed blob URL. Expires 60 seconds after issue.", {
+                example:
+                  "https://acct.blob.core.windows.net/research/paper.pdf?sv=2024-11-04&se=…&sig=…",
               }),
               fileName: str("Original file name, for the download prompt.", {
                 example: "radha-kunda-2026.pdf",
@@ -319,7 +320,7 @@ export async function registerResearchRoutes(fastify: FastifyInstance) {
         description: [
           "`multipart/form-data` with a file part named **`file`** and an optional text part named **`label`** (defaults to the file name).",
           "",
-          "The PDF goes into the private bucket — it never gets a public URL. Its text is extracted on upload to feed full-text search, and the page count is stored. Limit is 50 MB.",
+          "The PDF goes into the private container — it never gets a public URL. Its text is extracted on upload to feed full-text search, and the page count is stored. Limit is 50 MB.",
           "",
           "```bash",
           'curl -X POST "$API/api/v1/admin/research/$ID/files" \\',
@@ -347,7 +348,7 @@ export async function registerResearchRoutes(fastify: FastifyInstance) {
         tags: TAGS,
         summary: "Delete an attached PDF",
         description:
-          "Removes the row and the object from the private bucket. The publication itself is kept. Note the id here is the **file** id, not the publication id.",
+          "Removes the row and the blob from the private container. The publication itself is kept. Note the id here is the **file** id, not the publication id.",
         access: ACCESS,
         params: pathParams({ fileId: id("research file") }),
         response: {

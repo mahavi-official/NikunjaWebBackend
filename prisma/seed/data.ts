@@ -8,7 +8,7 @@
  * Two rules keep the seed safe to re-run and safe to remove:
  *   - every row has a stable natural key (slug / email / setting key), so
  *     seeding is an upsert rather than an insert;
- *   - every media row lives under the `seed/` S3 key prefix, which is how
+ *   - every media row lives under the `seed/` blob-name prefix, which is how
  *     `--clean` finds seeded media without touching real uploads.
  */
 
@@ -22,7 +22,7 @@ export const SEED_USER_EMAIL_DOMAIN = "@seed.radhakundah.test";
 // ═══════════════════════════════════════════════════════════════
 
 /**
- * No files are uploaded to S3. Each row points at picsum.photos, which serves
+ * No files are uploaded to Blob Storage. Each row points at picsum.photos, which serves
  * a stable image per `seed` string, so covers and galleries actually render in
  * the frontend while staying obviously placeholder.
  */

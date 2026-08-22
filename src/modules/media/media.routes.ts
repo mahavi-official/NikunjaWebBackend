@@ -131,7 +131,7 @@ export async function registerMediaRoutes(fastify: FastifyInstance) {
         tags: TAGS,
         summary: "Delete a media file",
         description: [
-          "Removes the row and the objects in S3, including every generated variant.",
+          "Removes the row and the blobs in Azure Blob Storage, including every generated variant.",
           "",
           "References from posts, authors, and gallery covers are set to null. A file still used as a gallery image cannot be deleted — that returns 409.",
         ].join("\n"),

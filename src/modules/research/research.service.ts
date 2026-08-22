@@ -1,7 +1,12 @@
 import { PrismaClient, Research, Prisma } from "@prisma/client";
 import { generateUniqueSlug, handleSlugChange } from "@/lib/slug";
 import { NotFoundError } from "@/lib/errors";
-import { uploadToS3, deleteFromS3, getPresignedUrl, generateS3Key } from "@/lib/s3";
+import {
+  uploadToBlobStorage,
+  deleteFromBlobStorage,
+  getSignedBlobUrl,
+  generateBlobName,
+} from "@/lib/blob-storage";
 import { extractPdfText, truncatePdfText } from "@/lib/pdf";
 import tagsService from "@/modules/tags/tags.service";
 import { CreateResearchInput, UpdateResearchInput, ListResearchQuery } from "./research.schema";
@@ -230,7 +235,7 @@ class ResearchService {
     const research = await this.getResearch(prisma, id);
 
     for (const file of research.files) {
-      await deleteFromS3("private", file.s3Key);
+      await deleteFromBlobStorage("private", file.blobName);
     }
 
     await prisma.research.delete({ where: { id } });
@@ -246,8 +251,8 @@ class ResearchService {
   ) {
     const research = await this.getResearch(prisma, researchId);
 
-    const s3Key = generateS3Key(`research/${researchId}`, fileName);
-    await uploadToS3("private", s3Key, buffer, mimeType);
+    const blobName = generateBlobName(`research/${researchId}`, fileName);
+    await uploadToBlobStorage("private", blobName, buffer, mimeType);
 
     const { text, pageCount } = await extractPdfText(buffer);
 
@@ -255,7 +260,7 @@ class ResearchService {
       data: {
         researchId,
         label,
-        s3Key,
+        blobName,
         fileName,
         mimeType,
         sizeBytes: buffer.length,
@@ -284,7 +289,7 @@ class ResearchService {
       throw new NotFoundError("File not found");
     }
 
-    await deleteFromS3("private", file.s3Key);
+    await deleteFromBlobStorage("private", file.blobName);
     await prisma.researchFile.delete({ where: { id: fileId } });
   }
 
@@ -305,7 +310,7 @@ class ResearchService {
       throw new NotFoundError("File not found");
     }
 
-    const url = await getPresignedUrl("private", file.s3Key);
+    const url = await getSignedBlobUrl("private", file.blobName);
 
     await prisma.researchView.create({
       data: {

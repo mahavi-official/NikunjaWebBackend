@@ -108,7 +108,7 @@ export const SITEMAP = {
   CACHE_TTL_MINUTES: 60,
 } as const;
 
-export const PRESIGNED_URL_TTL = 60; // seconds
+export const SIGNED_BLOB_URL_TTL = 60; // seconds
 
 export const SEARCH_WEIGHTS = {
   TITLE: "A",

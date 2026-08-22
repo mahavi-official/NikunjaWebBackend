@@ -114,7 +114,7 @@ Four things in the client PDF were contradictory or undefined. All are now settl
 | Database | **PostgreSQL** |
 | Frontend | **Next.js** (App Router) — built later |
 | API style | **REST**, versioned `/api/v1` |
-| Object storage | **S3** (two buckets: public media, private research PDFs) |
+| Object storage | **Azure Blob Storage** (containers: public media, private research PDFs, backups) |
 | Email | **Gmail SMTP** (App Password) |
 | Auth | **Google OAuth only** — no passwords anywhere |
 | Deployment | Backend and frontend deployed separately, **same parent domain** |
@@ -179,8 +179,8 @@ only marginal user benefit.
   discouraged.
   - **Accepted limitation (client agreed):** "view but not download" is *not* technically
     enforceable — anything the browser renders can be saved. What is delivered:
-    private S3 bucket with public access blocked at the bucket policy, no public URL,
-    **60-second presigned URLs** issued only to signed-in users, rendered in an inline
+    private Blob Storage container with access level Private (no anonymous read), no
+    public URL, **60-second SAS URLs** issued only to signed-in users, rendered in an inline
     PDF.js viewer with the download/print toolbar removed, `Content-Disposition: inline`,
     and right-click disabled. This stops casual downloading, not a determined user.
   - Every access is recorded in `ResearchView` — the gating is only meaningful if it is
@@ -298,13 +298,13 @@ screen.
 
 ### 3.12 Media and operations
 
-- **S3 from day one**, two buckets: public (media library, CDN-fronted) and private
-  (research PDFs, all public access blocked).
+- **Azure Blob Storage from day one**, three containers: public (media library,
+  CDN-fronted), private (research PDFs, no anonymous access), and backup (DB dumps).
 - **Image derivatives generated at upload** with `sharp`: thumb / medium / large / og
   (1200×630), each in WebP plus original format. EXIF stripped. This serves the client's
   "optimized images" and fast-loading requirements far better than transforming per request.
-- **Backups:** `pg_dump` cron **every 3 days at 02:00**, gzipped to a private S3 bucket,
-  90-day retention. **Database dump only** — media already lives in S3.
+- **Backups:** `pg_dump` cron **every 3 days at 02:00**, gzipped to a private blob
+  container, 90-day retention. **Database dump only** — media already lives in Blob Storage.
 - **Audit log:** every write action and every auth event — actor, IP, entity, action. No
   field-level diffs. 12-month retention, pruned weekly.
 - **Timezone:** everything stored **UTC**; API returns ISO 8601; the **browser formats to
@@ -384,7 +384,7 @@ never has to forward credentials for public pages.
 ### 4.3 Cross-cutting concerns (Fastify plugins)
 
 Auth/JWT decoration, RBAC guard, rate limiting, error handler, request logging, Prisma
-client, S3 client, mailer, audit logger.
+client, blob service client, mailer, audit logger.
 
 ### 4.4 Background work
 
@@ -441,7 +441,7 @@ src/
 │  ├─ oauth.ts               # Google token exchange + profile fetch
 │  ├─ slug.ts                # slugify + uniqueness + redirect-on-change
 │  ├─ sanitize.ts            # rich-text HTML sanitizer
-│  ├─ s3.ts                  # upload, presigned URLs
+│  ├─ blob-storage.ts        # upload, SAS URLs
 │  ├─ image.ts               # sharp derivatives
 │  ├─ pdf.ts                 # text extraction for search
 │  ├─ mailer.ts
@@ -808,13 +808,13 @@ model ResearchTag {
   @@index([tagId])
 }
 
-/// Lives in the PRIVATE S3 bucket. Never has a public URL.
-/// Access is via a 60s presigned URL issued only to signed-in users.
+/// Lives in the PRIVATE Azure Blob Storage container. Never has a public URL.
+/// Access is via a 60s SAS URL issued only to signed-in users.
 model ResearchFile {
   id         String @id @default(cuid())
   researchId String
   label      String // "Main paper", "Appendix A"
-  s3Key      String @unique
+  blobName   String @unique
   fileName   String
   mimeType   String
   sizeBytes  Int
@@ -957,12 +957,12 @@ model Like {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// MEDIA LIBRARY  (public S3 bucket + CDN)
+// MEDIA LIBRARY  (public Azure Blob container + CDN)
 // ═══════════════════════════════════════════════════════════════
 
 model Media {
   id        String  @id @default(cuid())
-  s3Key     String  @unique
+  blobName  String  @unique
   url       String // public CDN URL of the original
   fileName  String
   mimeType  String
@@ -1178,7 +1178,7 @@ GET    /me
 PATCH  /me
 GET    /me/sessions
 DELETE /me/sessions/:id
-GET    /me/research/:slug/view-url  # 60s presigned S3 URL, gated + logged
+GET    /me/research/:slug/view-url  # 60s SAS blob URL, gated + logged
 POST   /me/posts/:id/like
 DELETE /me/posts/:id/like
 POST   /me/comments
@@ -1251,7 +1251,7 @@ One `AppError` base with typed subclasses: `NotFound`, `Unauthorized`, `Forbidde
   tables, images, links, lists, blockquote, `pre`/`code`), stripping `<script>`, event
   handlers, and `javascript:` URLs. Client-side sanitizing is never trusted.
 - **Uploads:** magic-byte type detection with `file-type`, never extension. Images 10 MB,
-  PDFs 50 MB. Randomised S3 keys. EXIF stripped by `sharp`.
+  PDFs 50 MB. Randomised blob names. EXIF stripped by `sharp`.
 - Prisma parameterises everything; the only raw SQL is the tsvector triggers.
 - Audit log on every write and every auth event.
 - Secrets only via env, **validated at boot — the process refuses to start if a required
@@ -1415,7 +1415,7 @@ enforced with a redirect. `SITE_URL` makes every emitted URL absolute.
 - **Frontend auth:** admin CMS and member areas are client-rendered behind `noindex`. The
   access token is held **in memory** and refreshed via the httpOnly cookie.
   **Never `localStorage`.**
-- **Images:** `next/image` with the S3/CDN domain in `remotePatterns`, pointed at the
+- **Images:** `next/image` with the Blob Storage/CDN domain in `remotePatterns`, pointed at the
   pre-generated derivatives. Above-the-fold hero uses `priority`.
 - **Rewrites:** `/sitemap.xml` and `/sitemaps/*` proxied to the API.
 
@@ -1426,8 +1426,8 @@ enforced with a redirect. `SITE_URL` makes every emitted URL absolute.
 **Backend runtime:** `fastify`, `@fastify/cors`, `@fastify/helmet`, `@fastify/rate-limit`,
 `@fastify/multipart`, `@fastify/cookie`, `@fastify/static`, `@fastify/swagger`,
 `@fastify/swagger-ui`, `fastify-type-provider-zod`, `zod`, `@prisma/client`,
-`jsonwebtoken`, `google-auth-library`, `nodemailer`, `@aws-sdk/client-s3`,
-`@aws-sdk/s3-request-presigner`, `sharp`, `slugify`, `sanitize-html`, `file-type`,
+`jsonwebtoken`, `google-auth-library`, `nodemailer`, `@azure/storage-blob`,
+`sharp`, `slugify`, `sanitize-html`, `file-type`,
 `pdf-parse`, `pino`, `pino-pretty`, `node-cron`, `dotenv`.
 
 **Backend dev:** `typescript`, `prisma`, `tsx`, `vitest`, `supertest`, `eslint`,
@@ -1470,17 +1470,17 @@ SMTP_PASS=                                  # Gmail App Password (requires 2FA o
 MAIL_FROM="Radhakundah <no-reply@radhakundah.com>"
 CONTACT_NOTIFY_TO=
 
-S3_REGION=
-S3_BUCKET_PUBLIC=                           # media library
-S3_BUCKET_PRIVATE=                          # research PDFs, block ALL public access
-S3_ACCESS_KEY_ID=
-S3_SECRET_ACCESS_KEY=
-S3_PUBLIC_BASE_URL=                         # CDN in front of the public bucket
+AZURE_STORAGE_ACCOUNT_NAME=
+AZURE_STORAGE_ACCOUNT_KEY=
+AZURE_STORAGE_CONTAINER_PUBLIC=             # media library
+AZURE_STORAGE_CONTAINER_PRIVATE=            # research PDFs, access level Private
+AZURE_STORAGE_CONTAINER_BACKUP=             # DB dumps, access level Private
+AZURE_STORAGE_BLOB_ENDPOINT=                # optional; defaults to <account>.blob.core.windows.net
+AZURE_BLOB_PUBLIC_BASE_URL=                 # CDN in front of the public container
 SIGNED_URL_TTL_SECONDS=60
 
 BACKUP_ENABLED=true
 BACKUP_CRON="0 2 */3 * *"                   # 02:00 every 3 days
-BACKUP_S3_BUCKET=
 BACKUP_RETENTION_DAYS=90
 
 RECAPTCHA_SECRET=                           # optional; captcha inert if empty
@@ -1509,7 +1509,7 @@ LOG_LEVEL=info
 
 ### 13.2 Scalability
 
-- The backend is **stateless** (sessions in Postgres, files in S3) so it scales
+- The backend is **stateless** (sessions in Postgres, files in Blob Storage) so it scales
   horizontally behind a load balancer with no changes.
 - **Future modules** (donations, volunteers, LMS, events, podcasts, membership) are added
   as new module folders plus new tables. Nothing existing is rewritten. `Media`,
@@ -1520,7 +1520,7 @@ LOG_LEVEL=info
 
 ### 13.3 Reliability and operations
 
-- `pg_dump` → gzip → private S3, 90-day retention, with a **documented and tested restore
+- `pg_dump` → gzip → private blob container, 90-day retention, with a **documented and tested restore
   procedure**. An untested backup is not a backup.
 - Structured `pino` JSON logs with request IDs.
 - `/health` (liveness) and `/health/ready` (DB reachable).
@@ -1530,9 +1530,10 @@ LOG_LEVEL=info
 ### 13.4 Security in production
 
 - TLS everywhere, HSTS with preload.
-- Private S3 bucket with public access blocked **at the bucket policy level**, not just
-  object ACLs.
-- **Least-privilege IAM** — separate credentials for media, private files, and backups.
+- Private containers set to access level **Private** — no anonymous read, no container
+  listing.
+- **Least-privilege access** — prefer scoped SAS or per-container RBAC over the account
+  key where the deployment allows it.
 - No secrets in the repository.
 - The audit log provides a defensible record of who changed what — this is what the
   client's "Activity Logs" requirement actually means.
@@ -1560,9 +1561,9 @@ Follow in order. Each phase ends in something demonstrable and deployable.
 | 1 | **Foundation** | Repo, TS config, Fastify bootstrap, `env.ts` validation, Prisma connection, universal response envelope, error handler, `pino` logger, health checks, Swagger. Docker Compose for local Postgres. |
 | 2 | **Database** | Full `schema.prisma`, initial migration, hand-written tsvector trigger + GIN index migrations, seed script (super admin, default categories, settings). **Checkpoint — expensive to change later.** |
 | 3 | **Auth** | Google OAuth start/callback, whitelist matching, session creation, refresh rotation with reuse detection, logout, RBAC guard, super-admin protection, audit logging. Demonstrable via Swagger. |
-| 4 | **Media & S3** | Upload, `sharp` derivatives (thumb/medium/large/og + WebP), media library CRUD, folders, private-bucket presigning. |
+| 4 | **Media & Blob Storage** | Upload, `sharp` derivatives (thumb/medium/large/og + WebP), media library CRUD, folders, private-container SAS signing. |
 | 5 | **Core content** | Categories, video categories, tags, posts (draft/publish/schedule, placement, slug + redirect-on-change), shared SEO field handling, `buildSeo()` and `buildJsonLd()`. **This phase establishes the SEO pattern every later module reuses — get it right here.** |
-| 6 | **Research & authors** | Authors, co-author ordering, research CRUD, multi-file upload to the private bucket, PDF text extraction, gated view-URL endpoint, `ResearchView` logging. |
+| 6 | **Research & authors** | Authors, co-author ordering, research CRUD, multi-file upload to the private container, PDF text extraction, gated view-URL endpoint, `ResearchView` logging. |
 | 7 | **Gallery & video** | Segments with covers and descriptions, image upload + reorder + required alt text, YouTube ID parsing and auto-thumbnail, video detail pages. |
 | 8 | **Site & engagement** | About page, hero slides, settings, contact (+ email notify, rate limit, captcha escalation), newsletter, comments, likes, view counts, dashboard stats and recent activity. |
 | 9 | **Search & SEO surface** | Postgres FTS across posts/research/videos, sitemap index + paginated sitemaps, redirects API, preview tokens. **Public API frozen here.** |
