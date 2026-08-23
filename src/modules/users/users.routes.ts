@@ -107,19 +107,20 @@ export async function registerUsersRoutes(fastify: FastifyInstance) {
   fastify.patch(
     "/admin/users/:id",
     {
-      preHandler: requireRole("SUPER_ADMIN", "ADMIN"),
+      preHandler: requireRole("SUPER_ADMIN"),
       schema: op({
         tags: TAGS,
         summary: "Update a user",
         description: [
-          "Changes the display name and/or the editor module grants. Send only the fields you want to change.",
+          "Changes the display name, role, and/or the editor module grants. Send only the fields you want to change.",
           "",
-          "Email and role cannot be changed here, and the seeded super admin cannot be edited by anyone else — that attempt returns 403.",
+          "Super admin only. Email cannot be changed here — it is the account's identity, and the seeded super admin cannot be edited by anyone else — that attempt returns 403.",
         ].join("\n"),
-        access: STAFF,
+        access: "SUPER_ADMIN",
         params: idParam("user"),
-        body: jsonBody("Fields to change. Both are optional.", {
+        body: jsonBody("Fields to change. All are optional.", {
           name: str("New display name.", { minLength: 1, example: "Ananda Das" }),
+          role: enumOf(ROLE_VALUES, "New capability tier."),
           editorModules: editorModulesField,
         }),
         response: {
@@ -168,6 +169,28 @@ export async function registerUsersRoutes(fastify: FastifyInstance) {
       }),
     },
     (request, reply) => usersController.activateUser(request, reply)
+  );
+
+  fastify.delete(
+    "/admin/users/:id",
+    {
+      preHandler: requireRole("SUPER_ADMIN", "ADMIN"),
+      schema: op({
+        tags: TAGS,
+        summary: "Delete a user",
+        description: [
+          "Permanently removes the account. Anything they wrote (posts, research, etc.) stays published under their name.",
+          "",
+          "The seeded super admin cannot be deleted, and you cannot delete someone whose role is equal to or higher than your own — both return 403.",
+        ].join("\n"),
+        access: STAFF,
+        params: idParam("user"),
+        response: {
+          200: okMessage("The user was deleted.", "User deleted"),
+        },
+      }),
+    },
+    (request, reply) => usersController.deleteUser(request, reply)
   );
 
   fastify.get(

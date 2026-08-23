@@ -12,6 +12,7 @@ export const createUserSchema = z.object({
 
 export const updateUserSchema = z.object({
   name: z.string().min(1).optional(),
+  role: userRoleEnum.optional(),
   editorModules: z.array(z.string()).optional(),
 });
 

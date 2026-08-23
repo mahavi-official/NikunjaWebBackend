@@ -876,8 +876,10 @@ export const settingsSeed: Record<string, unknown> = {
   "seo.defaultOgImage": "", // filled in by the seeder
   "contact.email": "contact@radhakundah.test",
   "contact.phone": "+91 11 4000 0000",
-  "contact.address": "Radhakundah Research Trust, Aryaghat Road, Mathura District, Uttar Pradesh 281504",
-  "contact.mapEmbed": "https://www.openstreetmap.org/export/embed.html?bbox=77.48%2C27.52%2C77.52%2C27.55",
+  "contact.address": "Nagarjun-10, Nagarjun Municipality, Kathmandu District, Bagmati Province 44618, Nepal",
+  "contact.mapLat": "27.6913333",
+  "contact.mapLng": "85.2812778",
+  "contact.mapLabel": "Nagarjun-10, Kathmandu",
   "social.twitter": "https://twitter.com/radhakundah",
   "social.facebook": "https://facebook.com/radhakundah",
   "social.linkedin": "https://linkedin.com/company/radhakundah",
