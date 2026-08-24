@@ -46,10 +46,6 @@ class UsersService {
 
     this.checkSuperAdminProtection(user, actorId, actorRole);
 
-    if (data.role && data.role === "SUPER_ADMIN" && actorRole !== "SUPER_ADMIN") {
-      throw new ForbiddenError("Only a super admin can grant the super admin role");
-    }
-
     return prisma.user.update({
       where: { id: userId },
       data: {
