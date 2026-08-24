@@ -11,7 +11,8 @@ import { randomBytes } from "crypto";
 
 /**
  * Logical storage buckets, mapped onto Azure Blob Storage containers:
- *   - `public`  — media library, fronted by the CDN at AZURE_BLOB_PUBLIC_BASE_URL
+ *   - `public`  — media library, served from the account itself or from a CDN
+ *                 in front of it (see `getPublicBaseUrl`)
  *   - `private` — research PDFs, reachable only through a short-lived SAS URL
  *   - `backup`  — nightly database dumps
  */
@@ -60,6 +61,39 @@ function getContainerClient(container: BlobContainer): ContainerClient {
 }
 
 /**
+ * Where `public` blobs are readable from.
+ *
+ * Derived from the same endpoint and container the upload itself used, so the
+ * URL we persist cannot drift from where the bytes actually went. It used to
+ * come from `AZURE_BLOB_PUBLIC_BASE_URL` alone, which is an independent value:
+ * when it was pointed at the wrong account — and without the container segment
+ * — every media row got a URL that 404s, and `next/image` on the frontend
+ * throws a 500 rather than render an unconfigured host.
+ *
+ * The env var stays supported as an override for a CDN or custom domain, but
+ * it must name the container it fronts, and it is checked on the way in.
+ */
+function getPublicBaseUrl(): string {
+  const derived = `${getEndpoint().replace(/\/+$/, "")}/${getContainerName("public")}`;
+
+  const override = env.AZURE_BLOB_PUBLIC_BASE_URL?.trim().replace(/\/+$/, "");
+  if (!override) return derived;
+
+  // A base URL that does not end in the public container is the exact drift
+  // described above. Refuse it rather than write 404s into the database.
+  if (!new URL(override).pathname.replace(/\/+$/, "").endsWith(`/${getContainerName("public")}`)) {
+    console.error(
+      `[blob-storage] ignoring AZURE_BLOB_PUBLIC_BASE_URL="${override}": it does not end in the ` +
+        `public container ("${getContainerName("public")}"), so it cannot address uploaded blobs. ` +
+        `Using ${derived} instead.`
+    );
+    return derived;
+  }
+
+  return override;
+}
+
+/**
  * Uploads a buffer and returns the CDN URL for `public` uploads, or the blob
  * name for `private`/`backup` uploads (which are only ever served through a
  * signed URL, so a bare URL would be useless).
@@ -82,7 +116,7 @@ export async function uploadToBlobStorage(
   });
 
   if (container === "public") {
-    return `${env.AZURE_BLOB_PUBLIC_BASE_URL}/${blobName}`;
+    return `${getPublicBaseUrl()}/${blobName}`;
   }
 
   return blobName;

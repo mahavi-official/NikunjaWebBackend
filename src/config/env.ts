@@ -45,7 +45,17 @@ const envSchema = z.object({
     (v) => (v === "" ? undefined : v),
     z.string().url().optional()
   ),
-  AZURE_BLOB_PUBLIC_BASE_URL: z.string().url(),
+  /**
+   * Optional CDN or custom domain in front of the public container. It must
+   * address that container (i.e. end in `/<AZURE_STORAGE_CONTAINER_PUBLIC>`
+   * unless the domain is already rooted there). Leave it unset to serve blobs
+   * straight from the storage account, which `blob-storage.ts` derives from
+   * the endpoint and container the upload actually used.
+   */
+  AZURE_BLOB_PUBLIC_BASE_URL: z.preprocess(
+    (v) => (v === "" ? undefined : v),
+    z.string().url().optional()
+  ),
   SIGNED_URL_TTL_SECONDS: z.coerce.number().default(60),
 
   BACKUP_ENABLED: z.string().transform((v) => v === "true").default("true"),
