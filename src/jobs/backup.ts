@@ -4,7 +4,7 @@ import { readFile, unlink } from "node:fs/promises";
 import { gzip } from "node:zlib";
 import cron from "node-cron";
 import { env } from "@/config/env";
-import { uploadToS3 } from "@/lib/s3";
+import { uploadToBlobStorage } from "@/lib/blob-storage";
 
 const execAsync = promisify(exec);
 const gzipAsync = promisify(gzip);
@@ -19,9 +19,9 @@ export async function runBackup(): Promise<void> {
     const dump = await readFile(dumpPath);
     const compressed = await gzipAsync(dump);
 
-    await uploadToS3(
-      "private",
-      `backups/radhakundah-${timestamp}.sql.gz`,
+    await uploadToBlobStorage(
+      "backup",
+      `radhakundah-${timestamp}.sql.gz`,
       compressed,
       "application/gzip"
     );

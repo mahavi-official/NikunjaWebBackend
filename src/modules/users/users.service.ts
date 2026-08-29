@@ -50,6 +50,7 @@ class UsersService {
       where: { id: userId },
       data: {
         ...(data.name && { name: data.name }),
+        ...(data.role && { role: data.role }),
         ...(data.editorModules && { editorModules: data.editorModules }),
       },
     });

@@ -1,5 +1,6 @@
 import { FastifyRequest, FastifyReply } from "fastify";
 import { successResponse, paginationMeta } from "@/lib/response";
+import { checkUpload, sanitizeFolder } from "@/lib/upload-validation";
 import { createAuditLog } from "@/lib/audit";
 import mediaService from "./media.service";
 import { MediaUpdateInput } from "./media.schema";
@@ -13,13 +14,23 @@ export const mediaController = {
     }
 
     const buffer = await data.toBuffer();
-    const folder = (request.query as any).folder || "/";
+
+    // Size and real type, both measured from the bytes. `data.mimetype` and
+    // `data.filename` are whatever the client chose to send and decide nothing
+    // here — this is what makes the "sniffed from the bytes" promise in the
+    // route docs actually true.
+    const check = await checkUpload(buffer, "image");
+    if (!check.ok) {
+      return reply.status(check.status).send({ error: check.error });
+    }
+
+    const folder = sanitizeFolder(String((request.query as any).folder ?? "")) || "/";
 
     const media = await mediaService.uploadMedia(
       request.server.prisma,
       buffer,
       data.filename,
-      data.mimetype,
+      check.mimeType,
       folder,
       request.user!.id
     );
