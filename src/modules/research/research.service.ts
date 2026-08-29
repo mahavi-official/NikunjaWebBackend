@@ -1,5 +1,6 @@
 import { PrismaClient, Research, Prisma } from "@prisma/client";
 import { generateUniqueSlug, handleSlugChange } from "@/lib/slug";
+import { extensionForMime } from "@/lib/upload-validation";
 import { NotFoundError } from "@/lib/errors";
 import {
   uploadToBlobStorage,
@@ -251,7 +252,12 @@ class ResearchService {
   ) {
     const research = await this.getResearch(prisma, researchId);
 
-    const blobName = generateBlobName(`research/${researchId}`, fileName);
+    // Extension follows the sniffed type, not the client's filename.
+    const blobName = generateBlobName(
+      `research/${researchId}`,
+      fileName,
+      extensionForMime(mimeType)
+    );
     await uploadToBlobStorage("private", blobName, buffer, mimeType);
 
     const { text, pageCount } = await extractPdfText(buffer);

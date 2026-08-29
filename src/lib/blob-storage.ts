@@ -170,13 +170,22 @@ export async function deleteFromBlobStorage(
  * Leading and trailing slashes are trimmed off the folder: Azure accepts them but
  * a leading `/` produces a blob nested under an empty-named virtual directory.
  */
-export function generateBlobName(folder: string, fileName: string): string {
+export function generateBlobName(
+  folder: string,
+  fileName: string,
+  preferredExt?: string
+): string {
   const timestamp = Date.now();
   const random = randomBytes(8).toString("hex");
   const prefix = folder.replace(/^\/+|\/+$/g, "");
 
+  // The extension comes off a client-supplied filename, and Azure treats `/`
+  // in a blob name as a virtual directory — so an unfiltered one lets the
+  // uploader choose the path and the served extension (`x.jpg/../../evil.html`
+  // was a valid input here). Reduce it to plain alphanumerics.
   const dot = fileName.lastIndexOf(".");
-  const ext = dot > 0 ? fileName.slice(dot + 1).toLowerCase() : "";
+  const raw = (preferredExt ?? (dot > 0 ? fileName.slice(dot + 1) : "")).toLowerCase();
+  const ext = raw.replace(/[^a-z0-9]/g, "").slice(0, 8);
   const name = ext ? `${timestamp}-${random}.${ext}` : `${timestamp}-${random}`;
 
   return prefix ? `${prefix}/${name}` : name;

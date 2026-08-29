@@ -34,7 +34,7 @@ import { registerDashboardRoutes } from "@/modules/dashboard/dashboard.routes";
 import { registerHomeRoutes } from "@/modules/home/home.routes";
 import { registerMeRoutes } from "@/modules/users/me.routes";
 import { env } from "@/config/env";
-import { API_PREFIX } from "@/config/constants";
+import { API_PREFIX, FILE_LIMITS } from "@/config/constants";
 import { dateTime, obj, ok, op, str } from "@/schemas/common";
 
 const API_DESCRIPTION = `
@@ -91,7 +91,14 @@ export async function buildApp() {
     logger: createLogger(),
     requestIdLogLabel: "req.id",
     disableRequestLogging: false,
-    requestTimeout: 30000,
+    // Has to cover the slowest legitimate upload, not the typical API call: a
+    // 100MB research PDF on a modest connection takes minutes, and at the old
+    // 30s this cut the request off long before `fileSize` was ever reached —
+    // so raising the upload limits alone would have changed nothing. Kept just
+    // under App Service's ~230s front-end idle timeout, since the platform
+    // would drop the connection first anyway and a longer value here would
+    // only be a lie.
+    requestTimeout: 220000,
     ajv: {
       customOptions: {
         // `example` is an OpenAPI annotation, not a validation rule. Request
@@ -109,7 +116,15 @@ export async function buildApp() {
   await fastify.register(rateLimitPlugin);
   await fastify.register(prismaPlugin);
   await fastify.register(cookie);
-  await fastify.register(multipart);
+  // Registering this bare is a trap: @fastify/multipart falls back to
+  // `fastify.initialConfig.bodyLimit` for `fileSize`, which is Fastify's 1MB
+  // default. Every upload over 1MB was rejected — most real photographs —
+  // even though FILE_LIMITS and the route docs both promise 10MB images and
+  // 50MB PDFs. The ceiling here is the largest thing any route accepts; each
+  // route still enforces its own narrower limit.
+  await fastify.register(multipart, {
+    limits: { fileSize: FILE_LIMITS.PDF_MAX_BYTES, files: 1 },
+  });
   await fastify.register(authPlugin);
   await fastify.register(rbacPlugin);
   await fastify.register(swagger, {

@@ -3,6 +3,7 @@ import { successResponse, paginationMeta } from "@/lib/response";
 import { createAuditLog } from "@/lib/audit";
 import { buildSeo, buildScholarlyArticleJsonLd, buildBreadcrumbJsonLd } from "@/lib/seo";
 import { truncateText } from "@/lib/sanitize";
+import { checkUpload } from "@/lib/upload-validation";
 import researchService from "./research.service";
 import {
   CreateResearchInput,
@@ -198,6 +199,16 @@ export const researchController = {
     }
 
     const buffer = await data.toBuffer();
+
+    // Symmetric with the media library. These blobs are private and only ever
+    // handed out through a SAS URL, but a "PDF" that is really HTML would
+    // still open as a document in the reader's browser, so the type is read
+    // from the bytes rather than taken from the client.
+    const check = await checkUpload(buffer, "document");
+    if (!check.ok) {
+      return reply.status(check.status).send({ error: check.error });
+    }
+
     const label = (data.fields.label as any)?.value || data.filename;
 
     const file = await researchService.uploadResearchFile(
@@ -205,7 +216,7 @@ export const researchController = {
       id,
       buffer,
       data.filename,
-      data.mimetype,
+      check.mimeType,
       label
     );
 
