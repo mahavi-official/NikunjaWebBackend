@@ -114,10 +114,12 @@ class PostsService {
       where.status = query.status;
     }
 
-    if (query.placement) {
-      where.placement =
-        query.placement === "BOTH" ? "BOTH" : { in: [query.placement, "BOTH"] };
-    }
+
+    // hiding this for now as we needed to fetch articles, blogs and both
+    // if (query.placement) {
+    //   where.placement =
+    //     query.placement === "BOTH" ? "BOTH" : { in: [query.placement, "BOTH"] };
+    // }
 
     if (query.category) {
       where.categories = { some: { category: { slug: query.category } } };
