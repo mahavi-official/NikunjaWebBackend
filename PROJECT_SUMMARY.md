@@ -275,9 +275,9 @@ npm run seed:content   # optional sample content
 
 | Batch | Content | Modules | Files | Status |
 |-------|---------|---------|-------|--------|
-| 1 | Shared libs + plugins | slug, sanitize, audit, s3, image, pdf, mailer, seo, auth, rbac | 11 | ⏳ TODO |
+| 1 | Shared libs + plugins | slug, sanitize, audit, blob-storage, image, pdf, mailer, seo, auth, rbac | 11 | ⏳ TODO |
 | 2 | Auth routes + users | auth routes/controller, users CRUD | 6 | ⏳ TODO |
-| 3 | Media management | media upload, S3, derivatives | 4 | ⏳ TODO |
+| 3 | Media management | media upload, Blob Storage, derivatives | 4 | ⏳ TODO |
 | 4 | Core content + SEO | categories, tags, video-categories, posts | 16 | ⏳ TODO |
 | 5 | Research | authors, research (co-authors, PDFs, gated view-URLs) | 8 | ⏳ TODO |
 | 6 | Media display | gallery segments/images, videos | 8 | ⏳ TODO |

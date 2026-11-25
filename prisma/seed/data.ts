@@ -8,7 +8,7 @@
  * Two rules keep the seed safe to re-run and safe to remove:
  *   - every row has a stable natural key (slug / email / setting key), so
  *     seeding is an upsert rather than an insert;
- *   - every media row lives under the `seed/` S3 key prefix, which is how
+ *   - every media row lives under the `seed/` blob-name prefix, which is how
  *     `--clean` finds seeded media without touching real uploads.
  */
 
@@ -22,7 +22,7 @@ export const SEED_USER_EMAIL_DOMAIN = "@seed.radhakundah.test";
 // ═══════════════════════════════════════════════════════════════
 
 /**
- * No files are uploaded to S3. Each row points at picsum.photos, which serves
+ * No files are uploaded to Blob Storage. Each row points at picsum.photos, which serves
  * a stable image per `seed` string, so covers and galleries actually render in
  * the frontend while staying obviously placeholder.
  */
@@ -876,8 +876,10 @@ export const settingsSeed: Record<string, unknown> = {
   "seo.defaultOgImage": "", // filled in by the seeder
   "contact.email": "contact@radhakundah.test",
   "contact.phone": "+91 11 4000 0000",
-  "contact.address": "Radhakundah Research Trust, Aryaghat Road, Mathura District, Uttar Pradesh 281504",
-  "contact.mapEmbed": "https://www.openstreetmap.org/export/embed.html?bbox=77.48%2C27.52%2C77.52%2C27.55",
+  "contact.address": "Nagarjun-10, Nagarjun Municipality, Kathmandu District, Bagmati Province 44618, Nepal",
+  "contact.mapLat": "27.6913333",
+  "contact.mapLng": "85.2812778",
+  "contact.mapLabel": "Nagarjun-10, Kathmandu",
   "social.twitter": "https://twitter.com/radhakundah",
   "social.facebook": "https://facebook.com/radhakundah",
   "social.linkedin": "https://linkedin.com/company/radhakundah",

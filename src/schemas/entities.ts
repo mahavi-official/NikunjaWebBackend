@@ -41,7 +41,7 @@ const seoFields = {
 
 // ───────────────────────────── media ─────────────────────────────
 
-export const mediaSchema = obj("A file in the public media library (S3 + CDN).", {
+export const mediaSchema = obj("A file in the public media library (Azure Blob Storage + CDN).", {
   id: id("media"),
   url: str("Public CDN URL of the original file.", {
     example: "https://cdn.radhakundah.com/media/2026/01/kunda.webp",
@@ -64,7 +64,7 @@ export const mediaSchema = obj("A file in the public media library (S3 + CDN).",
 
 export const nullableMediaSchema: JsonSchema = { ...mediaSchema, nullable: true };
 
-/** Projection returned by the Media module itself (no `s3Key`, no uploader). */
+/** Projection returned by the Media module itself (no `blobName`, no uploader). */
 export const mediaItemSchema = obj("Media library entry.", {
   id: id("media"),
   url: str("Public CDN URL.", { example: "https://cdn.radhakundah.com/media/kunda.webp" }),
@@ -250,7 +250,7 @@ export const authorSchema = obj(
   }
 );
 
-/** File metadata exposed publicly — no URL and no S3 key. */
+/** File metadata exposed publicly — no URL and no blob name. */
 export const publicResearchFileSchema = obj(
   "An attached PDF. The download URL is issued separately and only to signed-in users.",
   {
@@ -262,11 +262,13 @@ export const publicResearchFileSchema = obj(
   }
 );
 
-export const researchFileSchema = obj("An attached PDF in the private bucket.", {
+export const researchFileSchema = obj("An attached PDF in the private container.", {
   id: id("research file"),
   researchId: id("research"),
   label: str("Human label for the file.", { example: "Full paper" }),
-  s3Key: str("Key in the private S3 bucket. Admin-only.", { example: "research/2026/paper.pdf" }),
+  blobName: str("Name of the blob in the private container. Admin-only.", {
+    example: "research/2026/paper.pdf",
+  }),
   fileName: str("Original file name.", { example: "radha-kunda-2026.pdf" }),
   mimeType: str("MIME type. Always `application/pdf`.", { example: "application/pdf" }),
   sizeBytes: int("File size in bytes.", { example: 2458112 }),
@@ -318,7 +320,7 @@ export const researchSchema = obj("A research publication, as staff see it.", {
   extractedText: nullableStr(
     "Text pulled out of the attached PDFs to feed full-text search. Returned on admin reads only — the public endpoints strip it."
   ),
-  files: arrayOf(researchFileSchema, "Attached PDFs with their storage keys."),
+  files: arrayOf(researchFileSchema, "Attached PDFs with their blob names."),
 });
 
 export const publicResearchSchema = obj("A published research record, safe for anonymous callers.", {

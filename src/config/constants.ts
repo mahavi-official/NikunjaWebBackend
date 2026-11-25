@@ -7,11 +7,22 @@ export const PAGINATION = {
   MAX_LIMIT: 100,
 };
 
+/**
+ * Upload ceilings.
+ *
+ * Bounded by memory, not by policy: `toBuffer()` holds the whole upload in RAM
+ * before it reaches blob storage, and sharp then holds a decoded bitmap plus
+ * every rendition on top of that. The App Service plan is B1 — 1.75GB shared
+ * between the gateway, this API, and Next — so these are set to stay well
+ * clear of that with concurrent uploads in flight. Raise the plan before
+ * raising these much further, and prefer streaming to blob storage over
+ * buffering if you need genuinely large files.
+ */
 export const FILE_LIMITS = {
-  IMAGE_MAX_MB: 10,
-  PDF_MAX_MB: 50,
-  IMAGE_MAX_BYTES: 10 * 1024 * 1024,
-  PDF_MAX_BYTES: 50 * 1024 * 1024,
+  IMAGE_MAX_MB: 25,
+  PDF_MAX_MB: 100,
+  IMAGE_MAX_BYTES: 25 * 1024 * 1024,
+  PDF_MAX_BYTES: 100 * 1024 * 1024,
 };
 
 export const IMAGE_SIZES = {
@@ -108,7 +119,7 @@ export const SITEMAP = {
   CACHE_TTL_MINUTES: 60,
 } as const;
 
-export const PRESIGNED_URL_TTL = 60; // seconds
+export const SIGNED_BLOB_URL_TTL = 60; // seconds
 
 export const SEARCH_WEIGHTS = {
   TITLE: "A",

@@ -2,7 +2,7 @@
 
 REST API for the Radhakundah content hub: research publications, articles and blogs, image galleries, and YouTube videos. Backend only — the Next.js frontend is a separate deployment sharing a parent domain so the session cookie works across both.
 
-**Stack:** Node.js + TypeScript · Fastify · Prisma · PostgreSQL · Google OAuth (no passwords) · S3 (public media + private research PDFs) · Postgres full-text search
+**Stack:** Node.js + TypeScript · Fastify · Prisma · PostgreSQL · Google OAuth (no passwords) · Azure Blob Storage (public media + private research PDFs) · Postgres full-text search
 
 Interactive API docs live at `/docs` once the server is running. They are generated from the route schemas, so they are always current — this file covers what the docs can't: setup, the security model, and the shape of the codebase.
 
@@ -35,7 +35,7 @@ Every variable is listed with a working default in **`.env.example`**, and `src/
 | `COOKIE_DOMAIN`, `COOKIE_SECURE` | Must cover both frontend and API hosts (`.radhakundah.com`). Locally use `.localhost` and `false`. |
 | `SITE_URL` | Where the OAuth callback redirects after sign-in, and the base for canonical URLs and sitemaps. |
 | `JWT_ACCESS_SECRET` | 32 characters minimum, enforced. |
-| `S3_*` | Placeholders are fine locally; only uploads and PDF downloads fail without real ones. |
+| `AZURE_STORAGE_*` | Placeholders are fine locally; only uploads and PDF downloads fail without real ones. |
 | `RECAPTCHA_SECRET` | Optional. Left empty, the contact form falls back to its honeypot and rate limit. |
 
 ## Authentication
@@ -75,7 +75,7 @@ Everything sits under `/api/v1`:
 |---|---|---|
 | `/public/*` | none | Published content only. Cacheable, CDN-friendly. |
 | `/auth/*` | mixed | Google sign-in, refresh, logout. |
-| `/me/*` | member+ | Own profile, likes, comments, presigned research PDFs. |
+| `/me/*` | member+ | Own profile, likes, comments, SAS-signed research PDFs. |
 | `/admin/*` | staff | Full CMS. |
 
 **Response envelope** — success `{ success: true, data, meta? }` (`meta` carries pagination), failure `{ success: false, error: { code, message, details? } }`. Services throw typed `AppError` subclasses; the error-handler plugin turns them into that envelope and never leaks a stack trace in production.
@@ -88,7 +88,7 @@ Everything sits under `/api/v1`:
 
 - **Posts and blogs are one model.** `Post.placement` is `ARTICLE`, `BLOG`, or `BOTH`. Slugs are globally unique, so every post has exactly one canonical URL: `/articles/{slug}`, except `BLOG` placement which lives at `/blogs/{slug}`. A `BOTH` post appears in both listings, and `/blogs/{slug}` is 301-redirected to the article URL — the redirect row is written automatically on create and on slug change.
 - **Authors are not users.** A paper's author needs no account; `ResearchAuthor` carries byline order and the corresponding-author flag.
-- **Research PDFs live in a private bucket** and are never given a public URL. Signed-in users get a 60-second presigned URL, and every open is recorded in `ResearchView`.
+- **Research PDFs live in a private container** and are never given a public URL. Signed-in users get a 60-second SAS URL, and every open is recorded in `ResearchView`.
 - **Taxonomy:** `Category` is scoped (ARTICLE/BLOG/RESEARCH), `Tag` is shared between posts and research, `VideoCategory` is independent.
 - **SEO columns are inline** on every publicly indexable entity (`metaTitle`, `metaDescription`, `ogImageId`, `noIndex`, …).
 - **Search vectors** are `tsvector` columns on `Post` and `Research`, maintained by database triggers, with GIN indexes.
@@ -114,7 +114,7 @@ Some rows exist specifically to prove the visibility filters work: a draft post,
 
 Worth knowing:
 
-- Images point at picsum.photos and research PDFs are metadata only — nothing is uploaded to S3, so the gated download will not resolve a file for seeded papers.
+- Images point at picsum.photos and research PDFs are metadata only — nothing is uploaded to Blob Storage, so the gated download will not resolve a file for seeded papers.
 - YouTube ids are real public videos, chosen so thumbnails and embeds load; their titles here are placeholders.
 - Re-running overwrites seeded rows from `prisma/seed/data.ts`. Content you authored yourself is never touched — cleanup matches only `seed-` ids, the `seed/` media prefix, and the seeded slugs.
 - `clean` leaves site settings and the About page in place; they are configuration, not sample content.
@@ -164,9 +164,9 @@ Request flow is `route → controller → service → Prisma`. Keep HTTP concern
 2. Apply migrations as an explicit release step, never at boot: `npx prisma migrate deploy`.
 3. `npm run build && npm start`.
 4. Terminate TLS at Nginx or an ALB in front of port 4000.
-5. Scale horizontally as needed — the process is stateless, with sessions in Postgres and files in S3.
+5. Scale horizontally as needed — the process is stateless, with sessions in Postgres and files in Azure Blob Storage.
 
-Backups run in-process via `node-cron`: `pg_dump` → gzip → S3, every three days, 90-day retention, all configurable through `BACKUP_*`. Audit logs are pruned weekly. Both are driven by `src/jobs/`.
+Backups run in-process via `node-cron`: `pg_dump` → gzip → Blob Storage, every three days, 90-day retention, all configurable through `BACKUP_*`. Audit logs are pruned weekly. Both are driven by `src/jobs/`.
 
 Monitoring hooks: `/health` and `/health/ready` for probes, structured JSON logs via pino, and the `AuditLog` table for an action trail.
 

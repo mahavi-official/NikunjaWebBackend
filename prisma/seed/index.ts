@@ -81,7 +81,7 @@ function printWhatToTry() {
     1 inactive hero slide.
 
   Notes:
-    · Images point at picsum.photos — nothing is uploaded to S3.
+    · Images point at picsum.photos — nothing is uploaded to Blob Storage.
     · Research PDFs are metadata only, so the gated download endpoint will not
       resolve a real file for seeded papers.
     · Video ids are real public YouTube videos, chosen so thumbnails and embeds

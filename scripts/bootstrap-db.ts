@@ -8,7 +8,7 @@
  * isn't reachable yet (e.g. `docker compose up -d postgres` hasn't run) or
  * missing config just logs a notice and exits 0. This deliberately does not
  * import `src/config/env`: that module validates the *entire* env schema
- * (S3, SMTP, Google OAuth, ...) at import time and calls `process.exit(1)`
+ * (Azure Blob Storage, SMTP, Google OAuth, ...) at import time and calls `process.exit(1)`
  * on the first missing var, which would abort `npm install` on a fresh
  * clone before `.env` exists.
  */
@@ -43,7 +43,7 @@ async function main() {
   const prisma = new PrismaClient();
   try {
     const alreadySeeded = await prisma.media.findFirst({
-      where: { s3Key: { startsWith: SEED_MEDIA_PREFIX } },
+      where: { blobName: { startsWith: SEED_MEDIA_PREFIX } },
       select: { id: true },
     });
     if (alreadySeeded) {

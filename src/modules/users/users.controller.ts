@@ -146,6 +146,21 @@ export const usersController = {
     );
   },
 
+  async deleteUser(request: FastifyRequest, reply: FastifyReply) {
+    const { id } = request.params as { id: string };
+
+    await usersService.deleteUser(
+      request.server.prisma,
+      id,
+      request.user!.id,
+      request.user!.role
+    );
+
+    await createAuditLog(request.server.prisma, request, "users.delete", "user", id);
+
+    return reply.send(successResponse({ message: "User deleted" }));
+  },
+
   async getSessions(request: FastifyRequest, reply: FastifyReply) {
     const sessions = await usersService.getUserSessions(
       request.server.prisma,

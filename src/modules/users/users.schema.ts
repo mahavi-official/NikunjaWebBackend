@@ -3,15 +3,23 @@ import { z } from "zod";
 export const userRoleEnum = z.enum(["SUPER_ADMIN", "ADMIN", "EDITOR", "MEMBER"]);
 export const userStatusEnum = z.enum(["WHITELISTED", "ACTIVE", "SUSPENDED"]);
 
+/**
+ * `SUPER_ADMIN` is a singleton reasserted at boot on the row matching
+ * `SUPER_ADMIN_EMAIL` (see `ensureSuperAdmin`) — it can never be assigned
+ * through the API, only `userRoleEnum`'s other three tiers.
+ */
+export const assignableUserRoleEnum = z.enum(["ADMIN", "EDITOR", "MEMBER"]);
+
 export const createUserSchema = z.object({
   email: z.string().email(),
   name: z.string().min(1),
-  role: userRoleEnum.default("MEMBER"),
+  role: assignableUserRoleEnum.default("MEMBER"),
   editorModules: z.array(z.string()).default([]),
 });
 
 export const updateUserSchema = z.object({
   name: z.string().min(1).optional(),
+  role: assignableUserRoleEnum.optional(),
   editorModules: z.array(z.string()).optional(),
 });
 

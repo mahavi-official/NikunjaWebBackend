@@ -38,7 +38,7 @@ A content hub for Nikunja Seva Pty Ltd (Australia) — a complete CMS-driven web
 | ORM | Prisma |
 | Database | PostgreSQL |
 | Authentication | Google OAuth only (no passwords) |
-| Storage | AWS S3 (two buckets: public media + private research PDFs) |
+| Storage | Azure Blob Storage (containers: public media, private research PDFs, backups) |
 | Search | PostgreSQL full-text search (tsvector + GIN indexes) |
 | Frontend | Next.js (separate repo, out of this project's scope) |
 | Deployment | Stateless, horizontally scalable |
@@ -57,7 +57,7 @@ A content hub for Nikunja Seva Pty Ltd (Australia) — a complete CMS-driven web
 - ✅ Google OAuth authentication + session management
 - ✅ Role-based access control (4 hardcoded roles)
 - ✅ Content management (posts, research, galleries, videos, etc.)
-- ✅ Media management (S3 uploads, image derivatives)
+- ✅ Media management (Blob Storage uploads, image derivatives)
 - ✅ Full-text search (PostgreSQL native)
 - ✅ SEO (metadata, sitemaps, structured data, redirects)
 - ✅ Background jobs (backups, audit log pruning)
@@ -138,7 +138,7 @@ A content hub for Nikunja Seva Pty Ltd (Australia) — a complete CMS-driven web
 - Posts + Blogs unified as `Post` model with `placement` field (ARTICLE/BLOG/BOTH)
 - `BOTH` posts have one canonical URL (`/articles/{slug}`), `/blogs/{slug}` 301-redirects
 - Categories scoped to ARTICLE/BLOG/RESEARCH; tags shared globally
-- Research PDFs access-gated to signed-in users via 60s presigned URLs
+- Research PDFs access-gated to signed-in users via 60s SAS URLs
 - Author separate from User (paper author ≠ staff account)
 - No password fields anywhere (Google OAuth only)
 - Refresh tokens hashed (SHA-256) in DB for revocation
@@ -308,7 +308,7 @@ Four hardcoded roles (no editable permissions table per `agent.md` §3.9):
 | `src/lib/slug.ts` | Slug generation + uniqueness | Check DB for duplicates, apply `-2` suffix strategy |
 | `src/lib/sanitize.ts` | HTML sanitizer for rich text | Allow: headings, tables, images, links, lists, blockquote, pre/code |
 | `src/lib/audit.ts` | Audit log writer | Centralized `audit(prisma, { userId, action, ... })` call |
-| `src/lib/s3.ts` | S3 client + presigned URLs | Upload, presign, delete, list objects |
+| `src/lib/blob-storage.ts` | Blob service client + SAS URLs | Upload, sign, delete |
 | `src/lib/image.ts` | Sharp image derivatives | Generate thumb/medium/large/og + WebP variants, strip EXIF |
 | `src/lib/pdf.ts` | PDF text extraction | Use `pdf-parse` to extract text from uploaded PDFs |
 | `src/lib/mailer.ts` | Email sender (Gmail SMTP) | Contact notifications, no bulk campaigns |
@@ -338,7 +338,7 @@ Four hardcoded roles (no editable permissions table per `agent.md` §3.9):
 - Super-admin protection (no one can delete/demote the protected user)
 - Session management (list active, revoke by ID)
 
-### Batch 3: Media & S3
+### Batch 3: Media & Blob Storage
 **Depends on:** Batches 1–2  
 **Blocks:** Batch 4+ (all cover/og images)  
 **Estimated effort:** 4 files, 600–700 LOC
@@ -348,7 +348,7 @@ Four hardcoded roles (no editable permissions table per `agent.md` §3.9):
 | File | Purpose |
 |------|---------|
 | `src/modules/media/media.schema.ts` | Zod: upload, folder CRUD, delete |
-| `src/modules/media/media.service.ts` | Upload to S3, generate derivatives (sharp), library list/search, delete |
+| `src/modules/media/media.service.ts` | Upload to Blob Storage, generate derivatives (sharp), library list/search, delete |
 | `src/modules/media/media.controller.ts` | Controller: thin envelope |
 | `src/modules/media/media.routes.ts` | Routes: POST /upload, GET library, DELETE |
 
@@ -386,12 +386,12 @@ Four hardcoded roles (no editable permissions table per `agent.md` §3.9):
 | Module | Files | Purpose |
 |--------|-------|---------|
 | `authors` | 4 | Author CRUD (separate from User), indexable detail page |
-| `research` | 4 | Papers with co-authors, multi-file upload (private S3), PDF text extraction, gated view URLs, access logging |
+| `research` | 4 | Papers with co-authors, multi-file upload (private container), PDF text extraction, gated view URLs, access logging |
 
 **Key logic:**
 - Multi-file per research item (main paper + appendices, 50 MB each)
 - PDF text extraction → stored in `Research.extractedText` for FTS, never returned to client
-- Gated view-URL endpoint: issues 60s presigned URL only to signed-in users, logs access to `ResearchView`
+- Gated view-URL endpoint: issues a 60s SAS URL only to signed-in users, logs access to `ResearchView`
 - Research author ordering + corresponding-author flag
 
 ### Batch 6: Gallery & Videos
@@ -472,7 +472,7 @@ Four hardcoded roles (no editable permissions table per `agent.md` §3.9):
 
 | File | Purpose |
 |------|---------|
-| `src/jobs/backup.ts` | pg_dump → gzip → S3, prune old backups |
+| `src/jobs/backup.ts` | pg_dump → gzip → Blob Storage, prune old backups |
 | `src/jobs/pruneAuditLogs.ts` | Delete audit logs older than 12 months |
 | Updates: `src/index.ts` | Wire jobs via node-cron, graceful shutdown with job cleanup |
 
@@ -903,7 +903,7 @@ npm run dev        # Boot server, test /health + /health/ready
 
 - [ ] `npm run dev` shows cron tasks starting
 - [ ] Backup job runs manually (test `runBackup()`)
-- [ ] Backup lands in S3, can be listed
+- [ ] Backup lands in Blob Storage, can be listed
 - [ ] Restore procedure documented + tested
 - [ ] All code passes `npm run lint` + `npm run build`
 - [ ] README + IMPLEMENTATION + docs up to date
@@ -1028,7 +1028,7 @@ npm run dev        # Boot server, test /health + /health/ready
 ❌ src/lib/slug.ts
 ❌ src/lib/sanitize.ts
 ❌ src/lib/audit.ts
-❌ src/lib/s3.ts
+❌ src/lib/blob-storage.ts
 ❌ src/lib/image.ts
 ❌ src/lib/pdf.ts
 ❌ src/lib/mailer.ts

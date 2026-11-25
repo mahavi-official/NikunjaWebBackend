@@ -334,13 +334,13 @@ model ResearchTag {
   @@index([tagId])
 }
 
-/// Lives in the PRIVATE S3 bucket. Never has a public URL.
-/// Access is via a 60s presigned URL issued only to signed-in users.
+/// Lives in the PRIVATE Azure Blob Storage container. Never has a public URL.
+/// Access is via a 60s SAS URL issued only to signed-in users.
 model ResearchFile {
   id         String @id @default(cuid())
   researchId String
   label      String
-  s3Key      String @unique
+  blobName   String @unique
   fileName   String
   mimeType   String
   sizeBytes  Int
@@ -483,12 +483,12 @@ model Like {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// MEDIA LIBRARY  (public S3 bucket + CDN)
+// MEDIA LIBRARY  (public Azure Blob container + CDN)
 // ═══════════════════════════════════════════════════════════════
 
 model Media {
   id        String  @id @default(cuid())
-  s3Key     String  @unique
+  blobName  String  @unique
   url       String
   fileName  String
   mimeType  String
