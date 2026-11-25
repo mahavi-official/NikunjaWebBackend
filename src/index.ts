@@ -1,8 +1,8 @@
-import { buildApp } from "@/server";
 import { env } from "@/config/env";
 import { scheduleBackup } from "@/jobs/backup";
 import { schedulePruning } from "@/jobs/pruneAuditLogs";
 import { ensureSuperAdminOrExit } from "@/lib/ensureSuperAdmin";
+import { buildApp } from "@/server";
 
 async function start() {
   const fastify = await buildApp();
@@ -15,7 +15,10 @@ async function start() {
   });
 
   try {
-    await fastify.listen({ port: env.PORT, host: "0.0.0.0" });
+    await fastify.listen({
+      port: env.PORT,
+      host: process.env.HOST || "0.0.0.0",
+    });
 
     scheduleBackup();
     schedulePruning(fastify.prisma);
@@ -38,4 +41,7 @@ process.on("SIGINT", async () => {
   process.exit(0);
 });
 
-start();
+start().catch((err) => {
+  console.error("[backend] startup failed:", err);
+  process.exit(1);
+});
