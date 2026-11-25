@@ -1,3 +1,4 @@
+import type { FormatEnum } from "sharp";
 import sharp from "sharp";
 
 export type DerivativeSize = "thumb" | "medium" | "large" | "og";
@@ -75,7 +76,7 @@ export async function generateImageDerivatives(
           ? webp
           : await pipeline
               .clone()
-              .toFormat(format as keyof sharp.FormatEnum, { quality: 90 })
+              .toFormat(format as keyof FormatEnum, { quality: 90 })
               .toBuffer(),
     };
   }
