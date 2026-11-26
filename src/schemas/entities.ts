@@ -466,6 +466,50 @@ export const subscriberSchema = obj("A newsletter subscriber.", {
   createdAt: dateTime("Subscription timestamp."),
 });
 
+export const NEWSLETTER_SEND_STATUS_VALUES = ["NOT_SENT", "SENDING", "SENT", "FAILED"];
+
+export const newsletterIssueSchema = obj("A newsletter issue: a page at `/newsletter/{slug}` and, once sent, an email.", {
+  id: id("newsletter issue"),
+  status: enumOf(CONTENT_STATUS_VALUES, "Whether the issue is live on the website."),
+  title: str("Issue title. Also the email subject.", { example: "Notes from the Kartik parikrama" }),
+  subtitle: nullableStr("One-line deck under the title; also the inbox preview text."),
+  slug: slug("newsletter issue"),
+  excerpt: nullableStr("Summary for archive listings. Auto-derived from the body when not supplied."),
+  content: str("Sanitised rich-text HTML body. Omitted from list rows.", { example: "<p>…</p>" }),
+  coverImageId: nullableStr("Id of the cover image in the media library."),
+  authorId: str("Id of the authoring user.", { example: "clw8x2k4h0000v8p2q1r3s4t5" }),
+  publishedAt: nullableDateTime("When the issue went live on the website."),
+  sendStatus: enumOf(
+    NEWSLETTER_SEND_STATUS_VALUES,
+    "`NOT_SENT` → `SENDING` → `SENT`, or `FAILED` if the run stopped. A `FAILED` issue, or a `SENT` one with `failedCount > 0`, can be sent again; only subscribers without a successful delivery are emailed."
+  ),
+  sendStartedAt: nullableDateTime("When the latest send run started."),
+  sentAt: nullableDateTime("When the latest send run finished."),
+  recipientCount: int("Active subscribers when the latest run started.", { example: 240 }),
+  sentCount: int("Subscribers who have successfully been emailed this issue.", { example: 238 }),
+  failedCount: int("Subscribers whose latest attempt failed.", { example: 2 }),
+  ...seoFields,
+  createdAt: dateTime("Creation timestamp."),
+  updatedAt: dateTime("Last update timestamp."),
+  author: obj("Who wrote the issue.", {
+    id: id("user"),
+    name: str("Display name.", { example: "Radha Dasi" }),
+    avatarUrl: nullableStr("Profile image URL."),
+  }),
+  coverImage: nullableMediaSchema,
+});
+
+const issueLinkSchema = {
+  ...obj("A neighbouring issue, for previous/next links.", {
+    title: str("Issue title."),
+    slug: slug("newsletter issue"),
+    publishedAt: nullableDateTime("Publication instant."),
+  }),
+  nullable: true,
+};
+
+export const newsletterIssueLinkSchema: JsonSchema = issueLinkSchema;
+
 // ───────────────────────────── SEO & ops ─────────────────────────────
 
 export const redirectSchema = obj("A stored URL redirect served by the frontend middleware.", {

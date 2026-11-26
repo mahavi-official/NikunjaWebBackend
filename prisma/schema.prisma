@@ -66,6 +66,7 @@ model User {
   auditLogs     AuditLog[]
   mediaUploads  Media[]
   researchViews ResearchView[]
+  newsletterIssues NewsletterIssue[]
 
   @@unique([provider, providerId])
   @@index([role, status])
@@ -512,6 +513,7 @@ model Media {
   segmentCovers    GallerySegment[] @relation("SegmentCover")
   galleryImages    GalleryImage[]
   heroSlides       HeroSlide[]
+  newsletterCovers NewsletterIssue[] @relation("NewsletterCover")
 
   @@index([folder, createdAt])
 }
@@ -584,7 +586,77 @@ model Subscriber {
   ip               String?
   createdAt        DateTime @default(now())
 
+  deliveries NewsletterDelivery[]
+
   @@index([isActive])
+}
+
+/// Mailing state of a newsletter issue. SENDING is held for the length of one
+/// send run; a run interrupted by a restart is flipped to FAILED at boot so an
+/// admin can resume it (already-delivered subscribers are skipped).
+enum NewsletterSendStatus {
+  NOT_SENT
+  SENDING
+  SENT
+  FAILED
+}
+
+enum NewsletterDeliveryStatus {
+  SENT
+  FAILED
+}
+
+/// One issue of the newsletter: a web page at /newsletter/{slug} and, once
+/// sent, an email to every active subscriber.
+model NewsletterIssue {
+  id           String        @id @default(cuid())
+  status       ContentStatus @default(DRAFT)
+  title        String
+  subtitle     String?
+  slug         String        @unique
+  excerpt      String?
+  content      String
+  coverImageId String?
+  authorId     String
+  publishedAt  DateTime?
+
+  sendStatus     NewsletterSendStatus @default(NOT_SENT)
+  sendStartedAt  DateTime?
+  sentAt         DateTime?
+  recipientCount Int                  @default(0)
+  sentCount      Int                  @default(0)
+  failedCount    Int                  @default(0)
+
+  metaTitle       String?
+  metaDescription String?
+  noIndex         Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  author     User                 @relation(fields: [authorId], references: [id])
+  coverImage Media?               @relation("NewsletterCover", fields: [coverImageId], references: [id], onDelete: SetNull)
+  deliveries NewsletterDelivery[]
+
+  @@index([status, publishedAt(sort: Desc)])
+  @@index([authorId])
+}
+
+/// One email of one issue to one subscriber. The unique pair is what makes a
+/// resumed send skip people who already have the issue.
+model NewsletterDelivery {
+  id           String                   @id @default(cuid())
+  issueId      String
+  subscriberId String
+  status       NewsletterDeliveryStatus
+  error        String?
+  createdAt    DateTime                 @default(now())
+
+  issue      NewsletterIssue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  subscriber Subscriber      @relation(fields: [subscriberId], references: [id], onDelete: Cascade)
+
+  @@unique([issueId, subscriberId])
+  @@index([subscriberId])
 }
 
 // ═══════════════════════════════════════════════════════════════

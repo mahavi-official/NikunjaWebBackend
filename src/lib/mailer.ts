@@ -24,6 +24,8 @@ export interface EmailOptions {
   html: string;
   text?: string;
   replyTo?: string;
+  /** Extra headers, e.g. List-Unsubscribe on newsletter mail. */
+  headers?: Record<string, string>;
 }
 
 export async function sendEmail(options: EmailOptions): Promise<void> {
@@ -36,6 +38,7 @@ export async function sendEmail(options: EmailOptions): Promise<void> {
       html: options.html,
       text: options.text,
       replyTo: options.replyTo,
+      headers: options.headers,
     });
   } catch (error) {
     console.error("Email send error:", error);

@@ -27,6 +27,7 @@ const SITEMAP_TYPES: SitemapType[] = [
   "videos",
   "authors",
   "categories",
+  "newsletter",
   "static",
 ];
 
