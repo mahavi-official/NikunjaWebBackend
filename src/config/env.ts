@@ -31,6 +31,12 @@ const envSchema = z.object({
   SMTP_PASS: z.string(),
   MAIL_FROM: z.string().default("Radhakundah <no-reply@radhakundah.com>"),
   CONTACT_NOTIFY_TO: z.string().email(),
+  /**
+   * Pause between newsletter emails. Issues are sent one message per
+   * subscriber over the same SMTP account, and Gmail throttles bursts, so the
+   * default keeps a send to about one message a second.
+   */
+  NEWSLETTER_SEND_DELAY_MS: z.coerce.number().int().min(0).default(1000),
 
   AZURE_STORAGE_ACCOUNT_NAME: z.string(),
   AZURE_STORAGE_ACCOUNT_KEY: z.string(),

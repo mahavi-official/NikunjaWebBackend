@@ -2,6 +2,7 @@ import { env } from "@/config/env";
 import { scheduleBackup } from "@/jobs/backup";
 import { schedulePruning } from "@/jobs/pruneAuditLogs";
 import { ensureSuperAdminOrExit } from "@/lib/ensureSuperAdmin";
+import newsletterIssuesService from "@/modules/newsletter/issues.service";
 import { buildApp } from "@/server";
 
 async function start() {
@@ -13,6 +14,13 @@ async function start() {
     info: (msg) => fastify.log.info(msg),
     error: (msg) => fastify.log.error(msg),
   });
+
+  // A newsletter send runs in this process; one cut short by a restart is
+  // left SENDING. Release it so an admin can resume from the CMS.
+  const interrupted = await newsletterIssuesService.recoverInterruptedSends(fastify.prisma);
+  if (interrupted > 0) {
+    fastify.log.warn(`${interrupted} newsletter send(s) were interrupted by a restart and marked FAILED; resume them from the CMS.`);
+  }
 
   try {
     await fastify.listen({

@@ -12,6 +12,7 @@ export type SitemapType =
   | "videos"
   | "authors"
   | "categories"
+  | "newsletter"
   | "static";
 
 interface SitemapEntry {
@@ -111,11 +112,25 @@ class SeoService {
         }));
       }
 
+      case "newsletter": {
+        const issues = await prisma.newsletterIssue.findMany({
+          where: publishedFilter,
+          skip,
+          take: PAGE_SIZE,
+          select: { slug: true, updatedAt: true },
+        });
+        return issues.map((i) => ({
+          loc: `${env.SITE_URL}/newsletter/${i.slug}`,
+          lastmod: i.updatedAt.toISOString(),
+        }));
+      }
+
       case "static":
         return [
           { loc: `${env.SITE_URL}/`, lastmod: new Date().toISOString() },
           { loc: `${env.SITE_URL}/about`, lastmod: new Date().toISOString() },
           { loc: `${env.SITE_URL}/contact`, lastmod: new Date().toISOString() },
+          { loc: `${env.SITE_URL}/newsletter`, lastmod: new Date().toISOString() },
         ];
     }
   }

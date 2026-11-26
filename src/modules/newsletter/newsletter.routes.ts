@@ -66,6 +66,37 @@ export async function registerNewsletterRoutes(fastify: FastifyInstance) {
     (request, reply) => newsletterController.unsubscribe(request, reply)
   );
 
+  // RFC 8058 one-click unsubscribe. Mail clients (Gmail, Apple Mail) POST
+  // `List-Unsubscribe=One-Click` as a form body to the List-Unsubscribe URL in
+  // each issue. Fastify answers 415 to form bodies by default, so the route
+  // gets its own encapsulated scope with a form parser that touches nothing else.
+  await fastify.register(async (scoped) => {
+    scoped.addContentTypeParser(
+      "application/x-www-form-urlencoded",
+      { parseAs: "string" },
+      (_request, body, done) => done(null, body)
+    );
+
+    scoped.post(
+      "/public/newsletter/unsubscribe/:token",
+      {
+        schema: op({
+          tags: TAGS,
+          summary: "One-click unsubscribe (RFC 8058)",
+          description:
+            "What a mail client calls when the reader presses its built-in Unsubscribe button. Same effect as the GET form. Any body is ignored.",
+          params: pathParams({
+            token: str("Unsubscribe token from the List-Unsubscribe header.", { example: "a1b2c3d4e5f6" }),
+          }),
+          response: {
+            200: okMessage("The address was unsubscribed.", "Unsubscribed"),
+          },
+        }),
+      },
+      (request, reply) => newsletterController.unsubscribe(request, reply)
+    );
+  });
+
   fastify.get(
     "/admin/newsletter",
     {

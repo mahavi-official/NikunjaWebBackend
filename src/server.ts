@@ -28,6 +28,7 @@ import { registerHeroRoutes } from "@/modules/hero/hero.routes";
 import { registerSettingsRoutes } from "@/modules/settings/settings.routes";
 import { registerContactRoutes } from "@/modules/contact/contact.routes";
 import { registerNewsletterRoutes } from "@/modules/newsletter/newsletter.routes";
+import { registerNewsletterIssueRoutes } from "@/modules/newsletter/issues.routes";
 import { registerSearchRoutes } from "@/modules/search/search.routes";
 import { registerSeoRoutes, registerSitemapRoutes } from "@/modules/seo/seo.routes";
 import { registerDashboardRoutes } from "@/modules/dashboard/dashboard.routes";
@@ -290,6 +291,7 @@ export async function buildApp() {
     await registerSettingsRoutes(fastify);
     await registerContactRoutes(fastify);
     await registerNewsletterRoutes(fastify);
+    await registerNewsletterIssueRoutes(fastify);
     await registerSearchRoutes(fastify);
     await registerSeoRoutes(fastify);
     await registerDashboardRoutes(fastify);
