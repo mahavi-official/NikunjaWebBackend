@@ -210,6 +210,9 @@ model Post {
   ogImage    Media?         @relation("PostOg", fields: [ogImageId], references: [id], onDelete: SetNull)
   categories PostCategory[]
   tags       PostTag[]
+  /// Bylines chosen from the Authors directory, in display order. Empty =
+  /// credit `author` (the staff account that created the post).
+  authors    PostAuthor[]
   comments   Comment[]
   likes      Like[]
 
@@ -265,6 +268,7 @@ model Author {
 
   photo    Media?           @relation("AuthorPhoto", fields: [photoId], references: [id], onDelete: SetNull)
   research ResearchAuthor[]
+  posts    PostAuthor[]
 }
 
 model Research {
@@ -321,6 +325,19 @@ model ResearchAuthor {
   author   Author   @relation(fields: [authorId], references: [id], onDelete: Cascade)
 
   @@id([researchId, authorId])
+  @@index([authorId])
+}
+
+/// Who an article or blog is credited to. Same directory as research authors.
+model PostAuthor {
+  postId   String
+  authorId String
+  order    Int    @default(0)
+
+  post   Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author Author @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@id([postId, authorId])
   @@index([authorId])
 }
 

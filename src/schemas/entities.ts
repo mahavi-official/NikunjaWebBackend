@@ -219,6 +219,21 @@ export const postSchema = obj("An article or blog entry. One model, split by `pl
     obj("Join row.", { tagId: id("tag"), postId: id("post"), tag: tagSchema }),
     "Tags attached to the post."
   ),
+  authors: arrayOf(
+    obj("Byline join row.", {
+      postId: id("post"),
+      authorId: id("author"),
+      order: int("Display position, 0 first.", { example: 0 }),
+      author: obj("The credited author.", {
+        id: id("author"),
+        name: str("Display name.", { example: "Radha Dasi" }),
+        slug: slug("author"),
+        affiliation: nullableStr("Institution or role."),
+        photo: nullableMediaSchema,
+      }),
+    }),
+    "Bylines chosen from the Authors directory, in order. Empty when the post is credited to `author`."
+  ),
 });
 
 export const postSummarySchema = obj("Compact post card used by homepage rails.", {

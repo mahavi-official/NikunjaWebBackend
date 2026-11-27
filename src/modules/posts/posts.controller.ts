@@ -65,6 +65,10 @@ export const postsController = {
     const post = await postsService.getPostBySlug(request.server.prisma, slug);
 
     const path = canonicalPath(post.placement, post.slug);
+    // Chosen bylines win; a post with none is credited to the account that wrote it.
+    const byline = post.authors.length
+      ? post.authors.map((link) => link.author.name).join(", ")
+      : post.author.name;
     const seo = buildSeo(
       post.metaTitle || post.title,
       post.metaDescription || post.excerpt || truncateText(stripHtmlTags(post.content), 155),
@@ -74,7 +78,7 @@ export const postsController = {
       "article",
       post.publishedAt?.toISOString(),
       post.updatedAt.toISOString(),
-      post.author.name
+      byline
     );
 
     seo.jsonLd = [
@@ -82,7 +86,7 @@ export const postsController = {
         title: post.title,
         description: post.excerpt || "",
         content: post.content,
-        author: post.author.name,
+        author: byline,
         publishedTime: post.publishedAt?.toISOString() || "",
         modifiedTime: post.updatedAt.toISOString(),
         image: post.ogImage?.url || post.coverImage?.url,

@@ -45,6 +45,18 @@ class AuthorsService {
           include: { research: true },
           orderBy: { order: "asc" },
         },
+        // Articles and blogs credited to this author; live ones only, since
+        // this feeds the public author page.
+        posts: {
+          where: { post: { status: "PUBLISHED", publishedAt: { lte: new Date() } } },
+          orderBy: { post: { publishedAt: "desc" } },
+          take: 50,
+          include: {
+            post: {
+              select: { id: true, title: true, slug: true, placement: true, excerpt: true, publishedAt: true },
+            },
+          },
+        },
       },
     });
 
