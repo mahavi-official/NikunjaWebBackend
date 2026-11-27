@@ -1,7 +1,7 @@
 import { PrismaClient, Post, Prisma } from "@prisma/client";
 import { generateUniqueSlug, handleSlugChange } from "@/lib/slug";
 import { sanitizeRichText, stripHtmlTags, truncateText } from "@/lib/sanitize";
-import { NotFoundError } from "@/lib/errors";
+import { NotFoundError, ValidationFailedError } from "@/lib/errors";
 import tagsService from "@/modules/tags/tags.service";
 import { CreatePostInput, UpdatePostInput, ListPostsQuery } from "./posts.schema";
 
@@ -11,7 +11,32 @@ const POST_INCLUDE = {
   ogImage: true,
   categories: { include: { category: true } },
   tags: { include: { tag: true } },
+  authors: {
+    orderBy: { order: "asc" },
+    include: {
+      author: { select: { id: true, name: true, slug: true, affiliation: true, photo: true } },
+    },
+  },
 } satisfies Prisma.PostInclude;
+
+/**
+ * Turns the ordered id list from the form into join rows, after checking every
+ * id names a real author. Duplicates keep their first position.
+ */
+export async function bylineRows(prisma: PrismaClient, authorIds: string[]) {
+  const ids = [...new Set(authorIds)];
+  if (ids.length === 0) return [];
+
+  const found = await prisma.author.findMany({ where: { id: { in: ids } }, select: { id: true } });
+  if (found.length !== ids.length) {
+    const known = new Set(found.map((a) => a.id));
+    throw new ValidationFailedError("Some chosen authors no longer exist. Reload the page and choose again.", [
+      { field: "authorIds", message: `Unknown author id(s): ${ids.filter((id) => !known.has(id)).join(", ")}` },
+    ]);
+  }
+
+  return ids.map((authorId, order) => ({ authorId, order }));
+}
 
 class PostsService {
   async createPost(
@@ -22,6 +47,7 @@ class PostsService {
     const slug = data.slug || (await generateUniqueSlug(prisma, data.title, "post"));
     const content = sanitizeRichText(data.content);
     const tags = await tagsService.findOrCreateTags(prisma, data.tagNames);
+    const bylines = await bylineRows(prisma, data.authorIds);
 
     const post = await prisma.post.create({
       data: {
@@ -42,6 +68,7 @@ class PostsService {
         ogImageId: data.ogImageId,
         canonicalUrl: data.canonicalUrl,
         noIndex: data.noIndex,
+        authors: { create: bylines },
         categories: {
           create: data.categoryIds.map((categoryId) => ({ categoryId })),
         },
@@ -198,6 +225,12 @@ class PostsService {
           : { disconnect: true },
       }),
     };
+
+    if (data.authorIds) {
+      // Inside the same update, so a failed write cannot leave the post
+      // with its old bylines removed and no new ones.
+      updateData.authors = { deleteMany: {}, create: await bylineRows(prisma, data.authorIds) };
+    }
 
     if (data.categoryIds) {
       await prisma.postCategory.deleteMany({ where: { postId: id } });

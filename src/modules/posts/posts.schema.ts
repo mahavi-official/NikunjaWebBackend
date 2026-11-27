@@ -21,6 +21,11 @@ export const createPostSchema = z.object({
   ogImageId: z.string().optional(),
   canonicalUrl: z.string().optional(),
   noIndex: z.boolean().default(false),
+  /**
+   * Bylines from the Authors directory, in display order. Replaces the whole
+   * set on update; `[]` clears it and the post falls back to its creator.
+   */
+  authorIds: z.array(z.string().min(1)).max(20).default([]),
 });
 
 export const updatePostSchema = createPostSchema.partial();

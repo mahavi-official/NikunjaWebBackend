@@ -73,6 +73,14 @@ const postBodyFields = {
   ogImageId: id("media file to use as the Open Graph image"),
   canonicalUrl: str("External canonical URL, if this is a syndicated copy."),
   noIndex: bool("Serve the post as `noindex, nofollow`.", { default: false }),
+  authorIds: {
+    ...arrayOf(
+      id("author from the Authors directory"),
+      "Bylines, in display order. Replaces the existing set; `[]` clears it, and a post with no bylines is credited to the staff account that created it. 422 if an id does not exist."
+    ),
+    maxItems: 20,
+    default: [],
+  },
 };
 
 export async function registerPostsRoutes(fastify: FastifyInstance) {
